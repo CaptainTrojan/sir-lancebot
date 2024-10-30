@@ -5,11 +5,11 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Run (51x39)",
+            "name": "Run controller (arena 51x39, bot 44x84, aruco 19,3)",
             "type": "debugpy",
             "request": "launch",
             "console": "integratedTerminal",
-            "program": "controller/test.py",
+            "program": "controller/run.py",
             "args": [
                 "510",
                 "390",
