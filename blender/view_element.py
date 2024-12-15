@@ -13,16 +13,7 @@ def project_points(points, P):
         projected = P @ point
         projected /= projected[2]
         projected_points.append((int(projected[0]), int(projected[1])))
-    return projected_points
-
-def transform_blender_to_opencv(coords):
-    # Transform Blender coordinates to OpenCV coordinates
-    transform_matrix = np.array([
-        [1, 0, 0],
-        [0, 0, 1],
-        [0, 1, 0]
-    ])
-    return np.dot(transform_matrix, coords)
+    return np.array(projected_points)
 
 def render_image_with_corners(image_path, metadata_path):
     # Load image
@@ -37,25 +28,17 @@ def render_image_with_corners(image_path, metadata_path):
 
     # Arena corners
     arena_corners = np.array(metadata['arena_corners'])
-    # arena_corners = np.array([transform_blender_to_opencv(corner) for corner in arena_corners])
+    arena_corners_bev = arena_corners[:, :2]
 
     # Project 3D points to 2D
-    projected_points = project_points(arena_corners, P)
+    projected_arena_corners = project_points(arena_corners, P)
 
     # Project [0, 0, 0] to 2D
     origin = np.array([[0.0, 0.0, 0.0]])
     projected_origin = project_points(origin, P)
-    
-    # print("=" * 50)
-    # print("Point 3D coordinates:")
-    # print(arena_corners)
-    # print("Projected 2D coordinates:")
-    # print(projected_points)
-    # print("Projected origin:")
-    # print(projected_origin)
 
     # Draw points on the image
-    for point in projected_points:
+    for point in projected_arena_corners:
         x, y = point
         cv2.circle(image, (x, y), 5, (0, 255, 0), -1)
 
@@ -63,10 +46,35 @@ def render_image_with_corners(image_path, metadata_path):
     x, y = projected_origin[0]
     cv2.circle(image, (x, y), 5, (0, 0, 255), -1)
 
-    # cv2.drawFrameAxes(image, camera_matrix, dist_coeffs, rvec, tvec, 0.1)
+    # Perform a perspective transformation on the arena corners -> BEV
+    # Get the transformation matrix
+    print(arena_corners_bev)
+    print(projected_arena_corners)
+    arena_bev_width = arena_corners_bev[1][0] - arena_corners_bev[0][0]
+    arena_bev_height = arena_corners_bev[2][1] - arena_corners_bev[0][1]
+    target_corners = np.array([
+        [0, 0],
+        [arena_bev_width, 0],
+        [0, arena_bev_height],
+        [arena_bev_width, arena_bev_height]
+    ])
+    target_height = 480
+    target_width = int(target_height * arena_bev_width // arena_bev_height)
+    target_corners = target_corners * target_width // arena_bev_width
+    M = cv2.getPerspectiveTransform(projected_arena_corners.astype(np.float32), target_corners.astype(np.float32))
+    # Perform the transformation
+    bev_image = cv2.warpPerspective(image, M, (target_width, target_height))
+    # Flip the BEV image so that Y-axis points upwards
+    bev_image = cv2.flip(bev_image, 0)
+
+    # Resize the image so that its height is the same as BEV image
+    image = cv2.resize(image, (image.shape[1] * target_height // image.shape[0], target_height))
+
+    # Concatenate the images
+    concatenated_image = np.hstack((image, bev_image))
 
     # Display the image
-    cv2.imshow('Image with Corners', image)
+    cv2.imshow("Image", concatenated_image)
 
 def main(dataset_path):
     image_dir = os.path.join(dataset_path, "images")
