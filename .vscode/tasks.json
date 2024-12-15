@@ -1,0 +1,13 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "blender render 1 image",
+            "type": "shell",
+            "command": "blender blender/battlebot-arena.blend --background --python blender/render_script.py",
+            "problemMatcher": []
+        }
+    ]
+}

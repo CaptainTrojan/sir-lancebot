@@ -18,19 +18,6 @@
                 "19",
                 "3"
             ]
-        },
-        {
-            "name": "Blender render 1 image",
-            "type": "debugpy",
-            "request": "launch",
-            "console": "integratedTerminal",
-            "program": "blender",
-            "args": [
-            "~/Documents/Blender/battlebot-arena.blend",
-            "--background",
-            "--python",
-            "render_script.py"
-            ]
         }
     ]
 }
