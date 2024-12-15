@@ -4,9 +4,9 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "blender render 1 image",
+            "label": "Render dataset",
             "type": "shell",
-            "command": "blender blender/battlebot-arena.blend --background --python blender/render_script.py",
+            "command": "blender blender/battlebot-arena.blend --quiet --background --python blender/render_script.py -- 10",
             "problemMatcher": []
         }
     ]

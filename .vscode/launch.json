@@ -16,7 +16,28 @@
                 "44",
                 "84",
                 "19",
-                "3"
+            "3"
+            ]
+        },
+        {
+            "name": "View dataset (re-render)",
+            "type": "debugpy",
+            "request": "launch",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Render dataset",
+            "program": "blender/view_element.py",
+            "args": [
+                
+            ]
+        },
+        {
+            "name": "View dataset",
+            "type": "debugpy",
+            "request": "launch",
+            "console": "integratedTerminal",
+            "program": "blender/view_element.py",
+            "args": [
+                
             ]
         }
     ]
