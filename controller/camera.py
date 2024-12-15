@@ -28,7 +28,7 @@ class DepthAICameraAdapter(CameraAdapter):
 
         # Linking
         camRgb.video.link(xoutVideo.input)
-        self.device = dai.Device(pipeline)
+        self.device = dai.Device(pipeline, maxUsbSpeed=dai.UsbSpeed.SUPER_PLUS)
         self.video_queue = self.device.getOutputQueue(name="video", maxSize=1, blocking=False)
 
     def get_frame(self):

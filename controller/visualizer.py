@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 from arena import ArenaState
+from time import perf_counter
 
 
 WINDOW_ORIGINAL = "Original view"
@@ -14,6 +15,7 @@ class Visualizer:
         self.preview_width = preview_width
         self.resize_factor = None
         self.px_per_mm = None
+        self.last_vis_time = None
 
     def set_resize_factor(self, original_width):
         self.resize_factor = self.preview_width / original_width
@@ -66,8 +68,14 @@ class Visualizer:
 
         # Draw the original frame for user to select the arena corners
         frame_resized = cv2.resize(vis_frame, dsize=None, fx=self.resize_factor, fy=self.resize_factor)
+        
+        if self.last_vis_time is not None:
+            fps = 1 / (perf_counter() - self.last_vis_time)
+            cv2.putText(frame_resized, f"FPS: {fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
 
         cv2.imshow(WINDOW_ORIGINAL, frame_resized)
+
+        self.last_vis_time = perf_counter()
 
     def _draw_arena_state(self, frame, arena_state: ArenaState, border_margin):
         target_area = [
