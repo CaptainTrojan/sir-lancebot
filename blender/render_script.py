@@ -1,3 +1,4 @@
+from copy import deepcopy
 from functools import cache
 import json
 import random
@@ -147,6 +148,8 @@ def randomize_camera(camera):
     camera.location.z += random.uniform(-0.2, 0.2)
     
     # Make the camera look at the point (0,0,0) with a deviation of ±0.1
+    # target_x = 0
+    # target_y = 0
     target_x = random.uniform(-0.1, 0.1)
     target_y = random.uniform(-0.1, 0.1)
     target_z = 0
@@ -167,32 +170,54 @@ def get_vertex_group_vertices(obj, group_name):
     vertices = [v for v in obj.data.vertices if group_index in [g.group for g in v.groups]]
     return vertices
 
-def generate_and_render_image(image_dir: str, metadata_dir: str):
+def generate_and_render_image(i, image_dir: str, metadata_dir: str):
     metadata = {}
 
     # Randomize the camera position
     camera = D.objects['Camera']
+    camera_loc = deepcopy(camera.location)
     randomize_camera(camera)
 
     # Save the camera projection matrix
     metadata['camera_P'] = np.array(get_3x4_P_matrix_from_blender(camera)[0]).tolist()
 
-    # Find arena corners
+    # Manipulate the arena
     arena = D.objects['Arena']
+    # Find the arena corners
     corners = get_vertex_group_vertices(arena, 'Corners')
-    
+    dl = random.uniform(-0.2, 0.2)
+    dw = random.uniform(-0.2, 0.2)
+    arena["arena_dl"] = dl
+    arena["arena_dw"] = dw
+    # update the arena
+    O.object.transform_apply(location=True, rotation=True, scale=True, properties=True)
+    # Assert the arena world matrix is still eye
+    assert arena.matrix_world == Matrix.Identity(4), f"Expected arena matrix to be identity {arena.matrix_world}"
+    # Collect the corner coordinates and update them by dw and dl
+    corner_coords = []
+    og_x_span = abs(corners[0].co.x)
+    og_y_span = abs(corners[0].co.y)
+    for c in corners:
+        co = np.array(c.co)
+        x_factor = (og_x_span + dw*0.5) / og_x_span
+        y_factor = (og_y_span + dl*0.5) / og_y_span
+        co[0] *= x_factor
+        co[1] *= y_factor
+        corner_coords.append(co)
+
     # Save the arena corner 3D coordinates
-    metadata['arena_corners'] = [list(arena.matrix_world @ c.co) for c in corners]
-    # Save the arena corner 2D coordinates in the metadata
-    # metadata['arena_corners_2d'] = np.array([project_by_object_utils(camera, arena.matrix_world @ c.co) for c in corners]).tolist()
+    metadata['arena_corners'] = np.array(corner_coords).tolist()
 
     # Set the render output path and render the image
-    element_id = str(uuid.uuid4())
+    element_id = f"{i}_{uuid.uuid4()}"
     output_path = os.path.join(image_dir, f"{element_id}.png")
     C.scene.render.filepath = output_path
     # Reduce the amount of samples for faster rendering
     C.scene.eevee.taa_render_samples = 10
     O.render.render(write_still=True)
+
+    # Reset the camera position
+    camera.location = camera_loc
 
     # Save the metadata
     metadata_path = os.path.join(metadata_dir, f"{element_id}.json")
@@ -216,4 +241,4 @@ if __name__ == "__main__":
     os.makedirs(metadata_dir)
 
     for i in tqdm(range(num_images), desc="Rendering images"):
-        generate_and_render_image(image_dir, metadata_dir)
+        generate_and_render_image(i, image_dir, metadata_dir)

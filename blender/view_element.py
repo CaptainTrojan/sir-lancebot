@@ -75,6 +75,10 @@ def main(dataset_path):
     image_files = sorted(os.listdir(image_dir))
     metadata_files = sorted(os.listdir(metadata_dir))
 
+    if len(image_files) == 0:
+        print(f"No images found in '{image_dir}'.")
+        return
+
     index = 0
     while True:
         image_path = os.path.join(image_dir, image_files[index])
@@ -96,4 +100,8 @@ if __name__ == "__main__":
     parser.add_argument('-d', '--dataset_path', type=str, default='BB_SYNTH_DATA', help='Path to the dataset directory.')
 
     args = parser.parse_args()
-    main(args.dataset_path)
+    if os.path.exists(args.dataset_path):
+        main(args.dataset_path)
+    else:
+        print(f"Dataset path '{args.dataset_path}' does not exist.")
+        exit(1)

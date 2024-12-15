@@ -26,9 +26,6 @@
             "console": "integratedTerminal",
             "preLaunchTask": "Render dataset",
             "program": "blender/view_element.py",
-            "args": [
-                
-            ]
         },
         {
             "name": "View dataset",
@@ -36,9 +33,6 @@
             "request": "launch",
             "console": "integratedTerminal",
             "program": "blender/view_element.py",
-            "args": [
-                
-            ]
         }
     ]
 }
