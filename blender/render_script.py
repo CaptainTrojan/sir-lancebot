@@ -17,17 +17,12 @@ C = bpy.context
 O = bpy.ops
 
 
-#---------------------------------------------------------------
-# 3x4 P matrix from Blender camera
-#---------------------------------------------------------------
-
-# BKE_camera_sensor_size
 def get_sensor_size(sensor_fit, sensor_x, sensor_y):
     if sensor_fit == 'VERTICAL':
         return sensor_y
     return sensor_x
 
-# BKE_camera_sensor_fit
+
 def get_sensor_fit(sensor_fit, size_x, size_y):
     if sensor_fit == 'AUTO':
         if size_x >= size_y:
@@ -36,12 +31,7 @@ def get_sensor_fit(sensor_fit, size_x, size_y):
             return 'VERTICAL'
     return sensor_fit
 
-# Build intrinsic camera parameters from Blender camera data
-#
-# See notes on this in 
-# blender.stackexchange.com/questions/15102/what-is-blenders-camera-projection-matrix-model
-# as well as
-# https://blender.stackexchange.com/a/120063/3581
+
 def get_calibration_matrix_K_from_blender(camd):
     if camd.type != 'PERSP':
         raise ValueError('Non-perspective cameras not supported')
@@ -76,46 +66,21 @@ def get_calibration_matrix_K_from_blender(camd):
         (   0,    0,   1)))
     return K
 
-# Returns camera rotation and translation matrices from Blender.
-# 
-# There are 3 coordinate systems involved:
-#    1. The World coordinates: "world"
-#       - right-handed
-#    2. The Blender camera coordinates: "bcam"
-#       - x is horizontal
-#       - y is up
-#       - right-handed: negative z look-at direction
-#    3. The desired computer vision camera coordinates: "cv"
-#       - x is horizontal
-#       - y is down (to align to the actual pixel coordinates 
-#         used in digital images)
-#       - right-handed: positive z look-at direction
+
 def get_3x4_RT_matrix_from_blender(cam):
-    # bcam stands for blender camera
     R_bcam2cv = Matrix(
         ((1, 0,  0),
         (0, -1, 0),
         (0, 0, -1)))
 
-    # Transpose since the rotation is object rotation, 
-    # and we want coordinate rotation
-    # R_world2bcam = cam.rotation_euler.to_matrix().transposed()
-    # T_world2bcam = -1*R_world2bcam @ location
-    #
-    # Use matrix_world instead to account for all constraints
     location, rotation = cam.matrix_world.decompose()[0:2]
     R_world2bcam = rotation.to_matrix().transposed()
-
-    # Convert camera location to translation vector used in coordinate changes
-    # T_world2bcam = -1*R_world2bcam @ cam.location
-    # Use location from matrix_world to account for constraints:     
+  
     T_world2bcam = -1*R_world2bcam @ location
 
-    # Build the coordinate transform matrix from world to computer vision camera
     R_world2cv = R_bcam2cv@R_world2bcam
     T_world2cv = R_bcam2cv@T_world2bcam
 
-    # put into 3x4 matrix
     RT = Matrix((
         R_world2cv[0][:] + (T_world2cv[0],),
         R_world2cv[1][:] + (T_world2cv[1],),
@@ -123,14 +88,13 @@ def get_3x4_RT_matrix_from_blender(cam):
         ))
     return RT
 
+
 def get_3x4_P_matrix_from_blender(cam):
     K = get_calibration_matrix_K_from_blender(cam.data)
     RT = get_3x4_RT_matrix_from_blender(cam)
     return K@RT, K, RT
-# ----------------------------------------------------------
-# Alternate 3D coordinates to 2D pixel coordinate projection code
-# adapted from https://blender.stackexchange.com/questions/882/how-to-find-image-coordinates-of-the-rendered-vertex?lq=1
-# to have the y axes pointing up and origin at the top-left corner
+
+
 def project_by_object_utils(cam, point):
     scene = bpy.context.scene
     co_2d = bpy_extras.object_utils.world_to_camera_view(scene, cam, point)
@@ -140,6 +104,7 @@ def project_by_object_utils(cam, point):
             int(scene.render.resolution_y * render_scale),
             )
     return Vector((co_2d.x * render_size[0], render_size[1] - co_2d.y * render_size[1]))
+
 
 def randomize_camera(camera):
     # Randomize the camera position
@@ -164,25 +129,15 @@ def randomize_camera(camera):
     camera.constraints['Track To'].up_axis = 'UP_Y'
     O.object.transform_apply(location=True, rotation=True, scale=True)
 
+
 @cache
 def get_vertex_group_vertices(obj, group_name):
     group_index = obj.vertex_groups[group_name].index
     vertices = [v for v in obj.data.vertices if group_index in [g.group for g in v.groups]]
     return vertices
 
-def generate_and_render_image(i, image_dir: str, metadata_dir: str):
-    metadata = {}
 
-    # Randomize the camera position
-    camera = D.objects['Camera']
-    camera_loc = deepcopy(camera.location)
-    randomize_camera(camera)
-
-    # Save the camera projection matrix
-    metadata['camera_P'] = np.array(get_3x4_P_matrix_from_blender(camera)[0]).tolist()
-
-    # Manipulate the arena
-    arena = D.objects['Arena']
+def randomize_arena(arena):
     # Find the arena corners
     corners = get_vertex_group_vertices(arena, 'Corners')
     dl = random.uniform(-0.2, 0.2)
@@ -204,9 +159,82 @@ def generate_and_render_image(i, image_dir: str, metadata_dir: str):
         co[0] *= x_factor
         co[1] *= y_factor
         corner_coords.append(co)
+    return corner_coords
+
+
+def generate_bots(corner_coords):
+    mean_width = 0.1
+    mean_length = 0.1
+    mean_height = 0.035
+    std_width = 0.02
+    std_length = 0.02
+    std_height = 0.005
+    corner_margin = 0.1
+    COUNT = random.randint(3, 6)
+
+    bots = []
+    def is_too_close(bot, bots, min_distance=0.1):
+        for existing_bot in bots:
+            distance = np.sqrt((bot['x'] - existing_bot['x'])**2 + (bot['y'] - existing_bot['y'])**2)
+            if distance < min_distance:
+                return True
+        return False
+    
+    # Get the Bots collection (create it if it doesn't exist)
+    if 'Bots' not in D.collections:
+        bots_collection = D.collections.new(name='Bots')
+    else:
+        bots_collection = D.collections['Bots']
+
+    for i in range(COUNT):
+        bot = {}
+        while True:
+            bot['x'] = random.uniform(corner_coords[0][0] + corner_margin, corner_coords[1][0] - corner_margin)
+            bot['y'] = random.uniform(corner_coords[0][1] + corner_margin, corner_coords[2][1] - corner_margin)
+            if not is_too_close(bot, bots):
+                break
+        bot['z'] = random.uniform(0, 0.01)
+        bot['width'] = random.gauss(mean_width, std_width)
+        bot['length'] = random.gauss(mean_length, std_length)
+        bot['height'] = random.gauss(mean_height, std_height)
+        bot['theta'] = random.uniform(0, 2*np.pi)
+        bots.append(bot)
+        
+        # Add a cube with the bot's dimensions to the scene
+        bpy.ops.mesh.primitive_cube_add(size=1, enter_editmode=False, align='WORLD', location=(bot['x'], bot['y'], bot['z'] + bot['height']/2))
+        bot_cube = bpy.context.active_object
+        bot_cube.scale = (bot['width'], bot['length'], bot['height'])
+        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+        bot_cube.rotation_euler = (0, 0, bot['theta'])
+        bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
+        bot_cube.name = f"Bot_{i}"
+        # Add the bot to the collection
+        bots_collection.objects.link(bot_cube)
+
+    return bots
+
+def generate_and_render_image(i, image_dir: str, metadata_dir: str):
+    metadata = {}
+
+    # Randomize the camera position
+    camera = D.objects['Camera']
+    camera_loc = deepcopy(camera.location)
+    randomize_camera(camera)
+
+    # Save the camera projection matrix
+    metadata['camera_P'] = np.array(get_3x4_P_matrix_from_blender(camera)[0]).tolist()
+
+    # Manipulate the arena
+    arena = D.objects['Arena']
+    corner_coords = randomize_arena(arena)
 
     # Save the arena corner 3D coordinates
     metadata['arena_corners'] = np.array(corner_coords).tolist()
+
+    # Generate a bunch of bots
+    bots = generate_bots(corner_coords)
+    # Save the bots
+    metadata['bots'] = bots
 
     # Set the render output path and render the image
     element_id = f"{i}_{uuid.uuid4()}"
@@ -216,13 +244,21 @@ def generate_and_render_image(i, image_dir: str, metadata_dir: str):
     C.scene.eevee.taa_render_samples = 10
     O.render.render(write_still=True)
 
-    # Reset the camera position
+    # Reset everything
     camera.location = camera_loc
+    O.object.transform_apply(location=True, rotation=True, scale=True)
+    # Delete the bots from the scene
+    # print(D.collections)
+    bots_collection = D.collections['Bots']
+    with bpy.context.temp_override(selected_objects=bots_collection.objects):
+        # print(bots_collection.objects)
+        O.object.delete()
 
     # Save the metadata
     metadata_path = os.path.join(metadata_dir, f"{element_id}.json")
     with open(metadata_path, 'w') as f:
         f.write(json.dumps(metadata, indent=4))
+
 
 if __name__ == "__main__":
     args = sys.argv[sys.argv.index("--") + 1:]
