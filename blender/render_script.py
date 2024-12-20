@@ -11,6 +11,8 @@ import shutil
 import uuid
 import bpy_extras.object_utils
 import numpy as np
+import bmesh
+import shapely as sp
 
 D = bpy.data
 C = bpy.context
@@ -110,7 +112,7 @@ def randomize_camera(camera):
     # Randomize the camera position
     camera.location.x += random.uniform(-0.2, 0.2)
     camera.location.y += random.uniform(-0.2, 0)
-    camera.location.z += random.uniform(-0.2, 0.2)
+    camera.location.z += random.uniform(0, 0.2)
     
     # Make the camera look at the point (0,0,0) with a deviation of ±0.1
     # target_x = 0
@@ -137,6 +139,13 @@ def get_vertex_group_vertices(obj, group_name):
     return vertices
 
 
+def replace_array(orig, new, start, amount):
+    if start < 0:
+        start = len(orig) + start
+    end = start + amount
+    return orig[:start] + new + orig[end:]
+
+
 def randomize_arena(arena):
     # Find the arena corners
     corners = get_vertex_group_vertices(arena, 'Corners')
@@ -161,24 +170,328 @@ def randomize_arena(arena):
         corner_coords.append(co)
     return corner_coords
 
+def create_polygon_extrusion(bot, vertices, dimension, name):
+    assert dimension in ['X', 'Y', 'Z'], f"Invalid dimension {dimension}"
 
-def generate_bots(corner_coords):
-    mean_width = 0.1
-    mean_length = 0.1
-    mean_height = 0.035
-    std_width = 0.02
-    std_length = 0.02
-    std_height = 0.005
+    if dimension == "X":
+        vertices = [(-bot['width']/2, v[0], v[1]) for v in vertices]
+    elif dimension == "Y":
+        vertices = [(v[0], -bot['length']/2, v[1]) for v in vertices]
+    else:
+        vertices = [(v[0], v[1], 0) for v in vertices]
+
+    # Create a new mesh and object for the polygon
+    mesh = bpy.data.meshes.new(name=f"{name}Mesh")
+    obj = bpy.data.objects.new(name=name, object_data=mesh)
+
+    # Link the object to the scene
+    bpy.context.collection.objects.link(obj)
+
+    # Create a bmesh object and add the polygon vertices
+    bm = bmesh.new()
+    verts = [bm.verts.new(v) for v in vertices]
+    bm.verts.ensure_lookup_table()
+
+    # Create a face from the polygon vertices
+    face = bm.faces.new(verts)
+
+    # Extrude the polygon across the specified dimension
+    extrude_result = bmesh.ops.extrude_face_region(bm, geom=[face])
+    extruded_verts = [v for v in extrude_result['geom'] if isinstance(v, bmesh.types.BMVert)]
+    if dimension == "X":
+        bmesh.ops.translate(bm, vec=(bot['width'], 0, 0), verts=extruded_verts)
+    elif dimension == "Y":
+        bmesh.ops.translate(bm, vec=(0, bot['length'], 0), verts=extruded_verts)
+    else:
+        bmesh.ops.translate(bm, vec=(0, 0, bot['height']), verts=extruded_verts)
+    
+    # Update the mesh with the new geometry
+    bm.to_mesh(mesh)
+    bm.free()
+
+    return obj
+
+def join_and_intersect(A_obj, B_obj):
+    # Join the two objects
+    join([A_obj, B_obj])
+    # Enter edit mode
+    bpy.ops.object.mode_set(mode='EDIT')
+    # Select any vertex
+    bpy.ops.mesh.select_all(action='DESELECT')
+    bpy.ops.object.mode_set(mode='OBJECT')
+    A_obj.data.vertices[0].select = True
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_linked(delimit=set())
+    # Apply the boolean intersection
+    bpy.ops.mesh.intersect_boolean(operation='INTERSECT', solver='EXACT')
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+def join(objs):
+    # Join the objects
+    bpy.context.view_layer.objects.active = objs[0]
+    bpy.ops.object.select_all(action='DESELECT')
+    for obj in objs:
+        obj.select_set(True)
+    bpy.ops.object.join()
+
+def generate_random_bot_config(bots: list, corner_coords):
+    min_width = 0.08
+    max_width = 0.12
+    min_length = 0.08
+    max_length = 0.12
+    min_height = 0.02
+    max_height = 0.05
     corner_margin = 0.1
-    COUNT = random.randint(3, 6)
 
-    bots = []
     def is_too_close(bot, bots, min_distance=0.1):
         for existing_bot in bots:
             distance = np.sqrt((bot['x'] - existing_bot['x'])**2 + (bot['y'] - existing_bot['y'])**2)
             if distance < min_distance:
                 return True
         return False
+
+    bot = {}
+    while True:
+        bot['x'] = random.uniform(corner_coords[0][0] + corner_margin, corner_coords[1][0] - corner_margin)
+        bot['y'] = random.uniform(corner_coords[0][1] + corner_margin, corner_coords[2][1] - corner_margin)
+        if not is_too_close(bot, bots):
+            break
+    bot['width'] = random.uniform(min_width, max_width)
+    bot['length'] = random.uniform(min_length, max_length)
+    bot['height'] = random.uniform(min_height, max_height)
+    bot['theta'] = random.uniform(0, 2*np.pi)
+
+    # Generate random front configuration
+    bot_type_options = ["pusher", "vertical spinner", "horizontal spinner"]
+    bot_type = random.choice(bot_type_options)
+
+    # Generate random wheel configurations
+    num_wheels = random.choice([1, 2]) if bot_type != "horizontal spinner" else 1
+    wheels = []
+    for i in range(num_wheels):
+        y_coord = random.uniform(-bot['length']*0.4, -bot['length']*0.25) if i == 0 else random.uniform(bot['length']*0.25, bot['length']*0.4)
+        x_coord = random.uniform(-bot['width']*0.25, bot['width']*0.25)
+        radius = random.uniform(bot['height']*0.4, bot['height']*0.75)
+        if i == 0:
+            axle_height = random.uniform(bot['height']*0.1, bot['height']*0.7)
+            bot['z'] = radius - axle_height
+        else:
+            # Ensure the bot is aligned with the ground
+            tries = 0
+            axle_height = radius - bot['z']
+            while axle_height < bot['height']*0.1 or axle_height > bot['height']*0.7:
+                # Re-genereate the radius and retry. We know this must succeed, because the first wheel also succeeded
+                radius = random.uniform(bot['height']*0.4, bot['height']*0.75)
+                axle_height = radius - bot['z']
+
+                tries += 1
+
+                # If too many tries, just set the same radius as the first wheel
+                if tries > 10:
+                    radius = wheels[0]['radius']
+                    axle_height = radius - bot['z']
+                    break
+
+        thickness = random.uniform(bot['width']*0.1, bot['width']*0.2)
+        darkness = random.uniform(0, 0.1)
+        wheels.append({
+            'y_coord': y_coord,
+            'x_offset': x_coord,
+            'axle_height': axle_height,
+            'radius': radius,
+            'thickness': thickness,
+            'darkness': darkness
+        })
+
+    # Return the bot configuration as a dictionary
+    bot['config'] = {
+        'wheels': wheels,
+        'wheels_covered': False, # random.choice([True, False]),
+        'type': bot_type
+    }
+
+    bots.append(bot)
+
+def create_wheel_object(bot_width, wheel, sign):
+    axle_length = (bot_width + wheel['x_offset']) * 0.5
+    x = sign * (axle_length)
+    y = wheel['y_coord']
+    radius = wheel['radius']
+    thickness = wheel['thickness']
+    axle_height = wheel['axle_height']
+
+    # Create a cylinder mesh for the wheel
+    bpy.ops.mesh.primitive_cylinder_add(radius=radius, depth=thickness, location=(x, y, axle_height))
+    wheel_obj = bpy.context.object
+    wheel_obj.name = "Wheel"
+
+    # Rotate the wheel to have the X axis as the rotation axis
+    wheel_obj.rotation_euler = (0, np.pi / 2, 0)
+
+    # Add the "Tires" material to the wheel
+    base_material = bpy.data.materials.get("Tires")
+    tire_material = base_material.copy()
+    # Find the Principled BSDF node and vary the color
+    bsdf = tire_material.node_tree.nodes.get("Principled BSDF")
+    color = wheel['darkness']
+    bsdf.inputs['Base Color'].default_value = (color, color, color, 1)
+    wheel_obj.data.materials.append(tire_material)
+
+    x_sign = 1 if x > 0 else -1
+
+    # Add the axle to the wheel
+    bpy.ops.mesh.primitive_cylinder_add(radius=0.005, depth=axle_length, location=(x - x_sign * axle_length/2, y, axle_height))
+    axle_obj = bpy.context.object
+    axle_obj.name = "Axle"
+    axle_obj.rotation_euler = (0, np.pi / 2, 0)
+
+    # Join the wheel and the axle
+    join([wheel_obj, axle_obj])
+
+    # Add the wheel to the Bots collection
+    bots_collection = bpy.data.collections.get('Bots')
+    if bots_collection:
+        bots_collection.objects.link(wheel_obj)
+
+    return wheel_obj
+
+def create_wheels(bot):
+    wheel_objs = []
+    for wheel in bot['config']['wheels']:
+        # Left wheel
+        wheel_obj = create_wheel_object(bot['width'], wheel, -1)
+        wheel_objs.append(wheel_obj)
+
+        # Right wheel
+        wheel_obj = create_wheel_object(bot['width'], wheel, 1)
+        wheel_objs.append(wheel_obj)
+    return wheel_objs
+
+def create_initial_bot_mesh(bot):
+    # Y break point must come after the last wheel
+    last_wheel = bot['config']['wheels'][-1]
+    last_wheel_y = last_wheel['y_coord']
+    last_wheel_r = last_wheel['radius']
+    y_break_point = random.uniform(last_wheel_y + last_wheel_r, bot['length']/2)    
+
+    # Add a big elbow only if the bot is a horizontal spinner
+    should_add_elbow = bot['config']['type'] == "horizontal spinner"
+    elbow_height = bot['height'] * 0.9
+
+    side_view_vertices = [
+        (-bot['length']/2, bot['height']),
+        (-bot['length']/2, 0),
+        (bot['length']/2, 0),
+        (y_break_point, bot['height'])
+    ]
+
+    if should_add_elbow:
+        side_view_vertices.insert(-1, (y_break_point, bot['height'] - elbow_height))
+        side_view_vertices.insert(-1, (bot['length']/2, bot['height'] - elbow_height))
+
+    return create_polygon_extrusion(bot, side_view_vertices, "X", "Bot")
+
+def sp_diff_wheel(polygon, wheel, bot_width, sign):
+    # Create a wheel polygon
+    wheel_center = (sign * (wheel['x_offset'] + bot_width/2), wheel['y_coord'])
+    wheel_polygon = sp.Polygon([
+        (wheel_center[0] + sign, wheel_center[1] + wheel['radius']),
+        (wheel_center[0] + sign, wheel_center[1] - wheel['radius']),
+        (wheel_center[0] - sign * wheel['thickness']/2, wheel_center[1] - wheel['radius']),
+        (wheel_center[0] - sign * wheel['thickness']/2, wheel_center[1] + wheel['radius'])
+    ])
+
+    # Subtract the wheel polygon from the main polygon
+    return polygon.difference(wheel_polygon)
+
+def create_bev_cutting_polygon(bot):
+    polygon_verts = [
+        (-bot['width']/2, bot['length']/2),     # Front left
+        (-bot['width']/2, -bot['length']/2),    # Back left
+        (bot['width']/2, -bot['length']/2),     # Back right
+        (bot['width']/2, bot['length']/2)       # Front right
+    ]
+    polygon = sp.Polygon(polygon_verts)
+
+    if not bot['config']['wheels_covered']:
+        # If wheels are not covered and they are inset, we must add a cutout for each
+        for wheel in bot['config']['wheels']:
+            polygon = sp_diff_wheel(polygon, wheel, bot['width'], -1) # Left wheel
+            polygon = sp_diff_wheel(polygon, wheel, bot['width'], 1)  # Right wheel
+
+    polygon_verts = list(polygon.exterior.coords)
+
+    # Create the cutting polygon in 2D (X, Y)
+    return create_polygon_extrusion(bot, polygon_verts, "Z", "BEVCutPolygon")
+
+def create_front_cutting_polygon(bot):
+    # Create the cutting polygon in 2D (X, Z) (leave as-is for now)
+    cutting_polygon_verts = [
+        (-bot['width']/2, 0),
+        (bot['width']/2, 0),
+        (bot['width']/2, bot['height']),
+        (-bot['width']/2, bot['height'])
+    ]
+    return create_polygon_extrusion(bot, cutting_polygon_verts, "Y", "FrontCutPolygon")
+
+def create_bot_object(bot):
+    # Create the bot mesh
+    bot_obj = create_initial_bot_mesh(bot)
+
+    # Create the cutting polygon from BEV
+    cut_obj = create_bev_cutting_polygon(bot)
+
+    # Apply the boolean intersection
+    join_and_intersect(bot_obj, cut_obj)
+
+    # Create the cutting polygon from front view
+    cut_obj = create_front_cutting_polygon(bot)
+
+    # Apply the boolean intersection
+    join_and_intersect(bot_obj, cut_obj)
+
+    # Create the wheels
+    wheel_objs = create_wheels(bot)
+    for wheel_obj in wheel_objs:
+        wheel_obj.parent = bot_obj
+
+    return bot_obj
+
+def add_bot_to_scene(bot, bots_collection, i):
+    # Create the bot mesh
+    bot_obj = create_bot_object(bot)
+
+    # Set the bot's location and rotation
+    bot_obj.location = (bot['x'], bot['y'], bot['z'])
+    bot_obj.rotation_euler = (0, 0, bot['theta'])
+    O.object.transform_apply(location=True, rotation=True, scale=False)
+
+    # Apply the material to the bot
+    base_material = bpy.data.materials.get("PLA")
+    material = base_material.copy()
+    material.name = f"PLA_{i}"
+    bot_obj.data.materials.append(material)
+    material.use_nodes = True
+    color_ramp = material.node_tree.nodes.get("Color Ramp")
+    color_ramp.color_ramp.elements[1].color = (
+        random.choice([random.uniform(0, 0.2), random.uniform(0.8, 1)]),
+        random.choice([random.uniform(0, 0.2), random.uniform(0.8, 1)]),
+        random.choice([random.uniform(0, 0.2), random.uniform(0.8, 1)]),
+        1
+    )
+
+    # Name the bot
+    bot_obj.name = f"Bot_{i}"
+
+    # Add the bot to the collection
+    bots_collection.objects.link(bot_obj)
+
+
+def generate_bots(corner_coords):
+    COUNT = random.randint(3, 6)
+    # COUNT = 1
+
+    bots = []
     
     # Get the Bots collection (create it if it doesn't exist)
     if 'Bots' not in D.collections:
@@ -187,29 +500,8 @@ def generate_bots(corner_coords):
         bots_collection = D.collections['Bots']
 
     for i in range(COUNT):
-        bot = {}
-        while True:
-            bot['x'] = random.uniform(corner_coords[0][0] + corner_margin, corner_coords[1][0] - corner_margin)
-            bot['y'] = random.uniform(corner_coords[0][1] + corner_margin, corner_coords[2][1] - corner_margin)
-            if not is_too_close(bot, bots):
-                break
-        bot['z'] = random.uniform(0, 0.01)
-        bot['width'] = random.gauss(mean_width, std_width)
-        bot['length'] = random.gauss(mean_length, std_length)
-        bot['height'] = random.gauss(mean_height, std_height)
-        bot['theta'] = random.uniform(0, 2*np.pi)
-        bots.append(bot)
-        
-        # Add a cube with the bot's dimensions to the scene
-        bpy.ops.mesh.primitive_cube_add(size=1, enter_editmode=False, align='WORLD', location=(bot['x'], bot['y'], bot['z'] + bot['height']/2))
-        bot_cube = bpy.context.active_object
-        bot_cube.scale = (bot['width'], bot['length'], bot['height'])
-        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-        bot_cube.rotation_euler = (0, 0, bot['theta'])
-        bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
-        bot_cube.name = f"Bot_{i}"
-        # Add the bot to the collection
-        bots_collection.objects.link(bot_cube)
+        generate_random_bot_config(bots, corner_coords)
+        add_bot_to_scene(bots[-1], bots_collection, i)
 
     return bots
 
@@ -263,6 +555,9 @@ def generate_and_render_image(i, image_dir: str, metadata_dir: str):
 if __name__ == "__main__":
     args = sys.argv[sys.argv.index("--") + 1:]
     num_images = int(args[0])
+
+    # Set seed
+    random.seed(1)
 
     # Clear the output directory
     output_dir = "BB_SYNTH_DATA"

@@ -20,11 +20,19 @@
             ]
         },
         {
-            "name": "View dataset (re-render)",
+            "name": "View dataset (re-render, 10)",
             "type": "debugpy",
             "request": "launch",
             "console": "integratedTerminal",
-            "preLaunchTask": "Render dataset",
+            "preLaunchTask": "Render dataset 10",
+            "program": "blender/view_element.py",
+        },
+        {
+            "name": "View dataset (re-render, 1)",
+            "type": "debugpy",
+            "request": "launch",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Render dataset 1",
             "program": "blender/view_element.py",
         },
         {

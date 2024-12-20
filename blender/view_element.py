@@ -15,6 +15,31 @@ def project_points(points, P):
         projected_points.append((int(projected[0]), int(projected[1])))
     return np.array(projected_points)
 
+
+def bot_to_BEV(points, bot, arena_corners_bev, bev_scale_factor, target_height):
+    bot_points = points.copy()
+    x = bot['x']
+    y = bot['y']
+    theta = bot['theta']
+
+    # Rotate the bot points
+    r = R.from_euler('z', theta)
+    bot_points = r.apply(bot_points)
+
+    # Translate the bot points to the bot's position
+    bot_points += np.array([x, y, 0])
+    bot_points = bot_points[:, :2]
+
+    # Shift and scale the points to BEV
+    bot_points = bot_points - arena_corners_bev[0]
+    bot_points = bot_points * bev_scale_factor
+    bot_points = bot_points.astype(np.int32)
+
+    # Flip the Y-axis so that it points upwards
+    bot_points[:, 1] = target_height - bot_points[:, 1]
+
+    return bot_points
+
 def render_element(image_path, metadata_path):
     # Load image
     image = cv2.imread(image_path)
@@ -32,20 +57,6 @@ def render_element(image_path, metadata_path):
 
     # Project 3D points to 2D
     projected_arena_corners = project_points(arena_corners, P)
-
-    # Project [0, 0, 0] to 2D
-    origin = np.array([[0.0, 0.0, 0.0]])
-    projected_origin = project_points(origin, P)
-
-    # Draw points on the image
-    for image_point, world_point in zip(projected_arena_corners, arena_corners):
-        x, y = image_point
-        cv2.circle(image, (x, y), 5, (0, 255, 0), -1)
-        # cv2.putText(image, f"({world_point[0]:.2f}, {world_point[1]:.2f})", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
-
-    # Draw the origin
-    x, y = projected_origin[0]
-    cv2.circle(image, (x, y), 5, (0, 0, 255), -1)
 
     # Perform a perspective transformation on the arena corners -> BEV
     # Get the transformation matrix
@@ -73,56 +84,10 @@ def render_element(image_path, metadata_path):
     image_scale_factor = target_height / image.shape[0]
     image = cv2.resize(image, (int(image_scale_factor * image.shape[1]), target_height))
 
-    # Draw bot 3D bounding boxes on the image view
-    bots = metadata['bots']
-    for bot in bots:
-        x = bot['x']
-        y = bot['y']
-        z = bot['z']
-        width = bot['width']
-        length = bot['length']
-        height = bot['height']
-        theta = bot['theta']
-
-        # Define the 3D points of the bot relative to its center
-        bot_points = np.array([
-            [-width/2, -length/2, 0],
-            [width/2, -length/2, 0],
-            [width/2, length/2, 0],
-            [-width/2, length/2, 0],
-            [-width/2, -length/2, height],
-            [width/2, -length/2, height],
-            [width/2, length/2, height],
-            [-width/2, length/2, height]
-        ])
-
-        # Rotate the bot points
-        r = R.from_euler('z', theta)
-        bot_points = r.apply(bot_points)
-
-        # Translate the bot points to the bot's position
-        bot_points += np.array([x, y, z])
-
-        # Project the bot points
-        projected_bot_points = project_points(bot_points, P)
-
-        # Scale them by the image scale factor
-        projected_bot_points = projected_bot_points * image_scale_factor
-        projected_bot_points = projected_bot_points.astype(np.int32)
-
-        # Draw the bot points
-        for i in range(4):
-            cv2.line(image, tuple(projected_bot_points[i]), tuple(projected_bot_points[i+4]), (0, 255, 255), 2)
-            cv2.line(image, tuple(projected_bot_points[i]), tuple(projected_bot_points[(i+1)%4]), (0, 255, 255), 2)
-            cv2.line(image, tuple(projected_bot_points[i+4]), tuple(projected_bot_points[(i+1)%4 + 4]), (0, 255, 255), 2)
-
     # Draw bot BEV bounding boxes on the BEV view
-    for bot in bots:
-        x = bot['x']
-        y = bot['y']
+    for bot in metadata['bots']:
         width = bot['width']
         length = bot['length']
-        theta = bot['theta']
 
         # Define the 2D points of the bot relative to its center
         bot_points = np.array([
@@ -132,28 +97,41 @@ def render_element(image_path, metadata_path):
             [-width/2, length/2, 0],
         ])
 
-        # Rotate the bot points
-        r = R.from_euler('z', theta)
-        bot_points = r.apply(bot_points)
-
-        # Translate the bot points to the bot's position
-        bot_points += np.array([x, y, 0])
-        bot_points = bot_points[:, :2]
-
-        # Shift and scale the points to BEV
-        bot_points = bot_points - arena_corners_bev[0]
-        bot_points = bot_points * bev_scale_factor
-        bot_points = bot_points.astype(np.int32)
-
-        # Flip the Y-axis so that it points upwards
-        bot_points[:, 1] = target_height - bot_points[:, 1]
+        # Transform the bot points to BEV
+        bev_bot_points = bot_to_BEV(bot_points, bot, arena_corners_bev, bev_scale_factor, target_height)
 
         # Draw the bot points
         for i in range(4):
-            cv2.line(bev_image, tuple(bot_points[i]), tuple(bot_points[(i+1)%4]), (0, 255, 255), 2)
+            cv2.line(bev_image, tuple(bev_bot_points[i]), tuple(bev_bot_points[(i+1)%4]), (0, 255, 255), 2)
+
+        # Collect wheel coordinates
+        wheel_points = []
+        for wheel in bot['config']['wheels']:
+            x = -width/2 - wheel['x_offset'] - wheel['thickness']/2
+            y = wheel['y_coord']
+            wheel_points.append([x, y, 0])
+
+            x = width/2 + wheel['x_offset'] + wheel['thickness']/2
+            wheel_points.append([x, y, 0])
+
+        # Transform the wheel points to BEV
+        bev_wheel_points = bot_to_BEV(np.array(wheel_points), bot, arena_corners_bev, bev_scale_factor, target_height)
+
+        # Draw the wheel points
+        for i in range(len(bev_wheel_points)):
+            cv2.circle(bev_image, tuple(bev_wheel_points[i]), 5, (0, 255, 255), -1)
+
+        # Draw a blue arrow pointing forward from the bot's center
+        center = bot_to_BEV(np.array([[0, 0, 0]]), bot, arena_corners_bev, bev_scale_factor, target_height)
+        forward = bot_to_BEV(np.array([[0, length, 0]]), bot, arena_corners_bev, bev_scale_factor, target_height)
+
+        cv2.arrowedLine(bev_image, tuple(center[0]), tuple(forward[0]), (0, 255, 255), 2)
 
     # Concatenate the images
     concatenated_image = np.hstack((image, bev_image))
+
+    # Draw the metadata path somewhere
+    cv2.putText(concatenated_image, metadata_path, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 1)
 
     cv2.imshow("Image", concatenated_image)
 
