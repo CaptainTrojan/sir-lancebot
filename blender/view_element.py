@@ -107,11 +107,11 @@ def render_element(image_path, metadata_path):
         # Collect wheel coordinates
         wheel_points = []
         for wheel in bot['config']['wheels']:
-            x = -width/2 - wheel['x_offset'] - wheel['thickness']/2
+            x = -width/2 - wheel['x_offset']
             y = wheel['y_coord']
             wheel_points.append([x, y, 0])
 
-            x = width/2 + wheel['x_offset'] + wheel['thickness']/2
+            x = width/2 + wheel['x_offset']
             wheel_points.append([x, y, 0])
 
         # Transform the wheel points to BEV

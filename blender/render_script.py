@@ -226,6 +226,21 @@ def join_and_intersect(A_obj, B_obj):
     bpy.ops.mesh.intersect_boolean(operation='INTERSECT', solver='EXACT')
     bpy.ops.object.mode_set(mode='OBJECT')
 
+def join_and_difference(A_obj, B_obj):
+    # Join the two objects
+    join([A_obj, B_obj])
+    # Enter edit mode
+    bpy.ops.object.mode_set(mode='EDIT')
+    # Select any vertex
+    bpy.ops.mesh.select_all(action='DESELECT')
+    bpy.ops.object.mode_set(mode='OBJECT')
+    A_obj.data.vertices[0].select = True
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_linked(delimit=set())
+    # Apply the boolean difference
+    bpy.ops.mesh.intersect_boolean(operation='DIFFERENCE', solver='EXACT')
+    bpy.ops.object.mode_set(mode='OBJECT')
+
 def join(objs):
     # Join the objects
     bpy.context.view_layer.objects.active = objs[0]
@@ -266,35 +281,72 @@ def generate_random_bot_config(bots: list, corner_coords):
     bot_type = random.choice(bot_type_options)
 
     # Generate random wheel configurations
+    wheel_armor_types = ["none", "individual", "full"]
     num_wheels = random.choice([1, 2]) if bot_type != "horizontal spinner" else 1
+    wheel_types = ["basic", "tire", "treaded"]
+    wheel_type_ps = [0.2, 0.5, 0.3] if num_wheels > 1 else [0.3, 0.7, 0.0]
+    wheel_y_range = bot['length'] * 0.15
+    wheel_y_starts = np.linspace(-bot['length']*0.4, bot['length']*0.4-wheel_y_range, num_wheels, endpoint=True)
     wheels = []
     for i in range(num_wheels):
-        y_coord = random.uniform(-bot['length']*0.4, -bot['length']*0.25) if i == 0 else random.uniform(bot['length']*0.25, bot['length']*0.4)
-        x_coord = random.uniform(-bot['width']*0.25, bot['width']*0.25)
-        radius = random.uniform(bot['height']*0.4, bot['height']*0.75)
+        y_coord = random.uniform(wheel_y_starts[i], wheel_y_starts[i] + wheel_y_range)
+
         if i == 0:
+            wheel_type = np.random.choice(wheel_types, p=wheel_type_ps)
+            if wheel_type == "treaded":
+                x_coord = random.uniform(0, bot['width']*0.25)
+                radius = random.uniform(bot['height']*0.2, bot['height']*0.4)
+            else:
+                x_coord = random.uniform(-bot['width']*0.25, bot['width']*0.25)
+                radius = random.uniform(bot['height']*0.3, bot['height']*0.75)
+
+            wheel_armor_type = np.random.choice(wheel_armor_types, p=[0.5, 0.2, 0.3])
+
             axle_height = random.uniform(bot['height']*0.1, bot['height']*0.7)
             bot['z'] = radius - axle_height
+            thickness = random.uniform(bot['width']*0.1, bot['width']*0.2)
+
         else:
-            # Ensure the bot is aligned with the ground
-            tries = 0
-            axle_height = radius - bot['z']
-            while axle_height < bot['height']*0.1 or axle_height > bot['height']*0.7:
-                # Re-genereate the radius and retry. We know this must succeed, because the first wheel also succeeded
-                radius = random.uniform(bot['height']*0.4, bot['height']*0.75)
-                axle_height = radius - bot['z']
+            # All bots will have the same type of wheels everywhere
+            wheel_type = wheels[0]['type']
+            wheel_armor_type = wheels[0]['armor_type']
 
-                tries += 1
+            if wheel_type == "treaded":
+                x_coord = wheels[0]['x_offset']
+                radius = wheels[0]['radius']
+                axle_height = wheels[0]['axle_height']
+                thickness = wheels[0]['thickness']
+            else:
+                x_coord = random.uniform(-bot['width']*0.25, bot['width']*0.25)
 
-                # If too many tries, just set the same radius as the first wheel
-                if tries > 10:
+                # 4 / 5 bots will have the same radius and axle height as the first wheel
+                if random.random() < 0.8:
                     radius = wheels[0]['radius']
-                    axle_height = radius - bot['z']
-                    break
+                    axle_height = wheels[0]['axle_height']
+                else:
+                    radius = random.uniform(bot['height']*0.4, bot['height']*0.75)
 
-        thickness = random.uniform(bot['width']*0.1, bot['width']*0.2)
+                    # Ensure the bot is aligned with the ground
+                    tries = 0
+                    axle_height = radius - bot['z']
+                    while axle_height < bot['height']*0.1 or axle_height > bot['height']*0.7:
+                        # Re-genereate the radius and retry. We know this must succeed, because the first wheel also succeeded
+                        radius = random.uniform(bot['height']*0.4, bot['height']*0.75)
+                        axle_height = radius - bot['z']
+
+                        tries += 1
+
+                        # If too many tries, just set the same radius as the first wheel
+                        if tries > 10:
+                            radius = wheels[0]['radius']
+                            axle_height = radius - bot['z']
+                            break
+
+                thickness = random.uniform(bot['width']*0.1, bot['width']*0.2)
         darkness = random.uniform(0, 0.1)
         wheels.append({
+            'type': wheel_type,
+            'armor_type': wheel_armor_type,
             'y_coord': y_coord,
             'x_offset': x_coord,
             'axle_height': axle_height,
@@ -313,29 +365,68 @@ def generate_random_bot_config(bots: list, corner_coords):
     bots.append(bot)
 
 def create_wheel_object(bot_width, wheel, sign):
-    axle_length = (bot_width + wheel['x_offset']) * 0.5
+    axle_length = (bot_width * 0.5 + wheel['x_offset']) 
     x = sign * (axle_length)
     y = wheel['y_coord']
     radius = wheel['radius']
     thickness = wheel['thickness']
     axle_height = wheel['axle_height']
+    wheel_type = wheel['type']
 
-    # Create a cylinder mesh for the wheel
-    bpy.ops.mesh.primitive_cylinder_add(radius=radius, depth=thickness, location=(x, y, axle_height))
-    wheel_obj = bpy.context.object
-    wheel_obj.name = "Wheel"
+    if wheel_type == "tire":
+        wheel_objects = [obj for obj in D.objects if obj.name.startswith("WHEEL")]
 
-    # Rotate the wheel to have the X axis as the rotation axis
-    wheel_obj.rotation_euler = (0, np.pi / 2, 0)
+        # Choose a random "WHEEL" object
+        random_wheel = random.choice(wheel_objects)
+        # random_wheel = wheel_objects[0]
 
-    # Add the "Tires" material to the wheel
-    base_material = bpy.data.materials.get("Tires")
-    tire_material = base_material.copy()
-    # Find the Principled BSDF node and vary the color
-    bsdf = tire_material.node_tree.nodes.get("Principled BSDF")
-    color = wheel['darkness']
-    bsdf.inputs['Base Color'].default_value = (color, color, color, 1)
-    wheel_obj.data.materials.append(tire_material)
+        # Duplicate the chosen "WHEEL" object
+        wheel_obj = random_wheel.copy()
+        wheel_obj.data = random_wheel.data.copy()
+        wheel_obj.name = "Wheel"
+        bpy.context.collection.objects.link(wheel_obj)
+        # Ensure the wheel has world coordinates
+        bpy.ops.object.select_all(action='DESELECT')
+        wheel_obj.select_set(True)
+        O.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS')
+
+        # Scale the wheel to the desired size
+        original_size = random_wheel.dimensions
+        target_size = (thickness, radius*2, radius*2)
+        wheel_obj.scale = (
+            target_size[0] / original_size[0],
+            target_size[1] / original_size[1],
+            target_size[2] / original_size[2]
+        )
+
+        # If the sign is negative, flip the wheel across the X axis
+        if sign == -1:
+            wheel_obj.scale[0] *= -1
+
+        # Apply the scale
+        O.object.transform_apply(location=False, rotation=True, scale=True)
+
+        # Set the location of the duplicated wheel
+        wheel_obj.location = (x, y, axle_height)
+
+        # Apply the location
+        O.object.transform_apply(location=True, rotation=False, scale=False)
+    else:
+        bpy.ops.mesh.primitive_cylinder_add(radius=radius, depth=thickness, location=(x, y, axle_height))
+        wheel_obj = bpy.context.object
+        wheel_obj.name = "Wheel"
+
+        # Rotate the wheel to have the X axis as the rotation axis
+        wheel_obj.rotation_euler = (0, np.pi / 2, 0)
+
+        # Add the "Tires" material to the wheel
+        base_material = bpy.data.materials.get("Tires")
+        tire_material = base_material.copy()
+        # Find the Principled BSDF node and vary the color
+        bsdf = tire_material.node_tree.nodes.get("Principled BSDF")
+        color = wheel['darkness']
+        bsdf.inputs['Base Color'].default_value = (color, color, color, 1)
+        wheel_obj.data.materials.append(tire_material)
 
     x_sign = 1 if x > 0 else -1
 
@@ -350,10 +441,72 @@ def create_wheel_object(bot_width, wheel, sign):
 
     # Add the wheel to the Bots collection
     bots_collection = bpy.data.collections.get('Bots')
-    if bots_collection:
-        bots_collection.objects.link(wheel_obj)
+    bots_collection.objects.link(wheel_obj)
 
     return wheel_obj
+
+def create_tread_object(bot, sign):
+    # Find the centers and radii of the first and last wheels
+    first_wheel = bot['config']['wheels'][0]
+    last_wheel = bot['config']['wheels'][-1]
+    first_wheel_center = (sign * (first_wheel['x_offset'] + bot['width']/2), first_wheel['y_coord'], first_wheel['axle_height'])
+    last_wheel_center = (sign * (last_wheel['x_offset'] + bot['width']/2), last_wheel['y_coord'], last_wheel['axle_height'])
+
+    assert first_wheel['radius'] == last_wheel['radius'], "All wheels must have the same radius"
+
+    # Inner function to create the tread shape - cylinder, rectangle, cylinder
+    r = first_wheel['radius'] * 1.1
+    t = first_wheel['thickness'] * 0.9
+    P1 = first_wheel_center
+    P2 = last_wheel_center
+    bpy.ops.mesh.primitive_cylinder_add(radius=r, depth=t, location=P1)
+    cylinder1 = bpy.context.object
+    cylinder1.name = "TreadCylinder1"
+    cylinder1.rotation_euler = (0, np.pi / 2, 0)
+
+    O.object.transform_apply(location=False, rotation=True, scale=False)
+
+    # Create the rectangle
+    length = np.sqrt((P2[0] - P1[0])**2 + (P2[1] - P1[1])**2)
+    bpy.ops.mesh.primitive_cube_add(size=1, location=((P1[0] + P2[0])/2, (P1[1] + P2[1])/2, (P1[2] + P2[2])/2))
+    rectangle = bpy.context.object
+    rectangle.name = "TreadRectangle"
+    rectangle.scale = (t*1.1, length*0.9, r*1.8)
+    O.object.transform_apply(location=False, rotation=False, scale=True)
+
+    # Create a slightly smaller rectangle and subtract it from the larger rectangle
+    bpy.ops.mesh.primitive_cube_add(size=1, location=((P1[0] + P2[0])/2, (P1[1] + P2[1])/2, (P1[2] + P2[2])/2))
+    rectangle_inner = bpy.context.object
+    rectangle_inner.name = "TreadRectangleInner"
+    rectangle_inner.scale = (t, length, r*2)
+    O.object.transform_apply(location=False, rotation=False, scale=True)
+    join_and_difference(rectangle, rectangle_inner)
+
+    # Create the second cylinder
+    bpy.ops.mesh.primitive_cylinder_add(radius=r, depth=t, location=P2)
+    cylinder2 = bpy.context.object
+    cylinder2.name = "TreadCylinder2"
+    cylinder2.rotation_euler = (0, np.pi / 2, 0)
+    O.object.transform_apply(location=False, rotation=True, scale=False)
+
+    # Join the objects
+    join([cylinder1, rectangle, cylinder2])
+
+    # Add the 'Rubber' material to the tread
+    base_material = bpy.data.materials.get("Rubber")
+    rubber_material = base_material.copy()
+    # Slightly tweak the color
+    bsdf = rubber_material.node_tree.nodes.get("Diffuse BSDF")
+    current_color = bsdf.inputs['Color'].default_value
+    bsdf.inputs['Color'].default_value = (current_color[0] + random.uniform(-0.1, 0.1), current_color[1] + random.uniform(-0.1, 0.1), current_color[2] + random.uniform(-0.1, 0.1), 1)
+
+    cylinder1.data.materials.append(rubber_material)
+
+    # Add the tread to the Bots collection
+    bots_collection = bpy.data.collections.get('Bots')
+    bots_collection.objects.link(cylinder1)
+    
+    return cylinder1
 
 def create_wheels(bot):
     wheel_objs = []
@@ -365,6 +518,17 @@ def create_wheels(bot):
         # Right wheel
         wheel_obj = create_wheel_object(bot['width'], wheel, 1)
         wheel_objs.append(wheel_obj)
+
+    # If the wheels are treaded, add a tread around them
+    if bot['config']['wheels'][0]['type'] == "treaded":
+        # Left tread
+        tread_obj = create_tread_object(bot, -1)
+        wheel_objs.append(tread_obj)
+
+        # Right tread
+        tread_obj = create_tread_object(bot, 1)
+        wheel_objs.append(tread_obj)
+
     return wheel_objs
 
 def create_initial_bot_mesh(bot):
@@ -495,13 +659,17 @@ def generate_bots(corner_coords):
     
     # Get the Bots collection (create it if it doesn't exist)
     if 'Bots' not in D.collections:
+        # print("Creating Bots collection")
         bots_collection = D.collections.new(name='Bots')
     else:
+        # print("Using existing Bots collection")
         bots_collection = D.collections['Bots']
 
     for i in range(COUNT):
         generate_random_bot_config(bots, corner_coords)
         add_bot_to_scene(bots[-1], bots_collection, i)
+
+    # print("Size of 'Bots' collection:", len(bots_collection.objects))
 
     return bots
 
@@ -557,7 +725,7 @@ if __name__ == "__main__":
     num_images = int(args[0])
 
     # Set seed
-    random.seed(1)
+    random.seed(0)
 
     # Clear the output directory
     output_dir = "BB_SYNTH_DATA"
@@ -571,5 +739,11 @@ if __name__ == "__main__":
     metadata_dir = os.path.join(output_dir, "metadata")
     os.makedirs(metadata_dir)
 
-    for i in tqdm(range(num_images), desc="Rendering images"):
-        generate_and_render_image(i, image_dir, metadata_dir)
+    if num_images == -1:
+        # Debug mode: generate and save a new .blend file
+        corner_coords = randomize_arena(D.objects['Arena'])
+        generate_bots(corner_coords)
+        bpy.ops.wm.save_as_mainfile(filepath=os.path.join(output_dir, "debug.blend"))
+    else:
+        for i in tqdm(range(num_images), desc="Rendering images"):
+            generate_and_render_image(i, image_dir, metadata_dir)
