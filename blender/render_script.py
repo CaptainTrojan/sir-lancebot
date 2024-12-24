@@ -258,7 +258,7 @@ def generate_random_bot_config(bots: list, corner_coords):
     max_height = 0.05
     corner_margin = 0.1
 
-    def is_too_close(bot, bots, min_distance=0.1):
+    def is_too_close(bot, bots, min_distance=0.15):
         for existing_bot in bots:
             distance = np.sqrt((bot['x'] - existing_bot['x'])**2 + (bot['y'] - existing_bot['y'])**2)
             if distance < min_distance:
@@ -281,10 +281,10 @@ def generate_random_bot_config(bots: list, corner_coords):
     bot_type = random.choice(bot_type_options)
 
     # Generate random wheel configurations
-    wheel_armor_types = ["none", "individual", "full"]
+    wheel_armor_types = ["none", "individual"]
     num_wheels = random.choice([1, 2]) if bot_type != "horizontal spinner" else 1
     wheel_types = ["basic", "tire", "treaded"]
-    wheel_type_ps = [0.2, 0.5, 0.3] if num_wheels > 1 else [0.3, 0.7, 0.0]
+    wheel_type_ps = [0.3, 0.5, 0.2] if num_wheels > 1 else [0.3, 0.7, 0.0]
     wheel_y_range = bot['length'] * 0.15
     wheel_y_starts = np.linspace(-bot['length']*0.4, bot['length']*0.4-wheel_y_range, num_wheels, endpoint=True)
     wheels = []
@@ -294,17 +294,18 @@ def generate_random_bot_config(bots: list, corner_coords):
         if i == 0:
             wheel_type = np.random.choice(wheel_types, p=wheel_type_ps)
             if wheel_type == "treaded":
-                x_coord = random.uniform(0, bot['width']*0.25)
-                radius = random.uniform(bot['height']*0.2, bot['height']*0.4)
+                x_coord = random.uniform(bot['width']*0.1, bot['width']*0.2)
+                radius = random.uniform(bot['height']*0.3, bot['height']*0.4)
+                thickness = random.uniform(bot['width']*0.1, x_coord)
             else:
-                x_coord = random.uniform(-bot['width']*0.25, bot['width']*0.25)
+                x_coord = random.uniform(-bot['width']*0.25, bot['width']*0.2)
                 radius = random.uniform(bot['height']*0.3, bot['height']*0.75)
+                thickness = random.uniform(bot['width']*0.1, bot['width']*0.2)
 
-            wheel_armor_type = np.random.choice(wheel_armor_types, p=[0.5, 0.2, 0.3])
+            wheel_armor_type = np.random.choice(wheel_armor_types, p=[0.5, 0.5])
 
-            axle_height = random.uniform(bot['height']*0.1, bot['height']*0.7)
+            axle_height = random.uniform(bot['height']*0.1, radius)
             bot['z'] = radius - axle_height
-            thickness = random.uniform(bot['width']*0.1, bot['width']*0.2)
 
         else:
             # All bots will have the same type of wheels everywhere
@@ -324,7 +325,7 @@ def generate_random_bot_config(bots: list, corner_coords):
                     radius = wheels[0]['radius']
                     axle_height = wheels[0]['axle_height']
                 else:
-                    radius = random.uniform(bot['height']*0.4, bot['height']*0.75)
+                    radius = random.uniform(bot['height']*0.3, bot['height']*0.75)
 
                     # Ensure the bot is aligned with the ground
                     tries = 0
@@ -355,11 +356,24 @@ def generate_random_bot_config(bots: list, corner_coords):
             'darkness': darkness
         })
 
+    last_wheel = wheels[-1]
+    last_wheel_y = last_wheel['y_coord']
+    last_wheel_r = last_wheel['radius']        
+    y_break_point = random.uniform(last_wheel_y + last_wheel_r, bot['length']/2)
+
+    color = (
+        random.choice([random.uniform(0, 0.2), random.uniform(0.8, 1)]),
+        random.choice([random.uniform(0, 0.2), random.uniform(0.8, 1)]),
+        random.choice([random.uniform(0, 0.2), random.uniform(0.8, 1)]),
+    )
+
     # Return the bot configuration as a dictionary
     bot['config'] = {
         'wheels': wheels,
         'wheels_covered': False, # random.choice([True, False]),
-        'type': bot_type
+        'type': bot_type,
+        'y_break_point': y_break_point,
+        'color': color
     }
 
     bots.append(bot)
@@ -508,16 +522,65 @@ def create_tread_object(bot, sign):
     
     return cylinder1
 
+def create_wheel_armor_object(bot_width, bot_height, bot_color, wheel, sign):
+    axle_length = (bot_width * 0.5 + wheel['x_offset']) 
+    y = wheel['y_coord']
+    radius = wheel['radius']
+    thickness = wheel['thickness']
+    axle_height = wheel['axle_height']
+
+    wheel_y_margin = 0.2 * thickness
+    armor_shift_towards_bot = 0.5 * thickness
+    wheel_x_margin = 0.5 * thickness + armor_shift_towards_bot
+    armor_thickness = 0.2 * thickness
+    x = sign * (axle_length - armor_shift_towards_bot)
+
+    # Armor = box around the wheel
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(x, y, axle_height))   
+    armor = bpy.context.object
+    armor.name = "Armor"
+    armor.scale = (thickness + wheel_x_margin * 2, radius*2 + wheel_y_margin * 2, bot_height*0.7)
+    O.object.transform_apply(location=False, rotation=False, scale=True)
+
+    # Create a slightly smaller box and subtract it from the larger box
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(x, y, axle_height))
+    armor_outer = bpy.context.object
+    armor_outer.name = "ArmorInner"
+    armor_outer.scale = (thickness + (wheel_x_margin + armor_thickness) * 2, radius*2 + (wheel_y_margin + armor_thickness) * 2, bot_height*0.7)
+    O.object.transform_apply(location=False, rotation=False, scale=True)
+    join_and_difference(armor, armor_outer)
+
+    # Add the 'PLA' material to the armor
+    base_material = bpy.data.materials.get("PLA")
+    armor_material = base_material.copy()
+    armor.data.materials.append(armor_material)
+    armor_material.use_nodes = True
+    color_ramp = armor_material.node_tree.nodes.get("Color Ramp")
+    color_ramp.color_ramp.elements[1].color = (
+        bot_color[0],
+        bot_color[1],
+        bot_color[2],
+        1
+    )
+
+    # Add the armor to the Bots collection
+    bots_collection = bpy.data.collections.get('Bots')
+    bots_collection.objects.link(armor)
+
+    return armor
+
 def create_wheels(bot):
     wheel_objs = []
     for wheel in bot['config']['wheels']:
-        # Left wheel
-        wheel_obj = create_wheel_object(bot['width'], wheel, -1)
-        wheel_objs.append(wheel_obj)
+        for sign in [-1, 1]:
+            # Left wheel
+            wheel_obj = create_wheel_object(bot['width'], wheel, sign)
+            wheel_objs.append(wheel_obj)
 
-        # Right wheel
-        wheel_obj = create_wheel_object(bot['width'], wheel, 1)
-        wheel_objs.append(wheel_obj)
+            # Add armor if the wheel is covered
+            if wheel['armor_type'] == "individual":
+                armor_obj = create_wheel_armor_object(bot['width'], bot['height'], bot['config']['color'], wheel, sign)
+                wheel_objs.append(armor_obj)
 
     # If the wheels are treaded, add a tread around them
     if bot['config']['wheels'][0]['type'] == "treaded":
@@ -533,10 +596,7 @@ def create_wheels(bot):
 
 def create_initial_bot_mesh(bot):
     # Y break point must come after the last wheel
-    last_wheel = bot['config']['wheels'][-1]
-    last_wheel_y = last_wheel['y_coord']
-    last_wheel_r = last_wheel['radius']
-    y_break_point = random.uniform(last_wheel_y + last_wheel_r, bot['length']/2)    
+    y_break_point = bot['config']['y_break_point']
 
     # Add a big elbow only if the bot is a horizontal spinner
     should_add_elbow = bot['config']['type'] == "horizontal spinner"
@@ -550,8 +610,8 @@ def create_initial_bot_mesh(bot):
     ]
 
     if should_add_elbow:
-        side_view_vertices.insert(-1, (y_break_point, bot['height'] - elbow_height))
         side_view_vertices.insert(-1, (bot['length']/2, bot['height'] - elbow_height))
+        side_view_vertices.insert(-1, (y_break_point, bot['height'] - elbow_height))
 
     return create_polygon_extrusion(bot, side_view_vertices, "X", "Bot")
 
@@ -569,12 +629,23 @@ def sp_diff_wheel(polygon, wheel, bot_width, sign):
     return polygon.difference(wheel_polygon)
 
 def create_bev_cutting_polygon(bot):
-    polygon_verts = [
-        (-bot['width']/2, bot['length']/2),     # Front left
-        (-bot['width']/2, -bot['length']/2),    # Back left
-        (bot['width']/2, -bot['length']/2),     # Back right
-        (bot['width']/2, bot['length']/2)       # Front right
-    ]
+    y_break_point = bot['config']['y_break_point']
+    if y_break_point is None:
+        polygon_verts = [
+            (-bot['width']/2, bot['length']/2),     # Front left
+            (-bot['width']/2, -bot['length']/2),    # Back left
+            (bot['width']/2, -bot['length']/2),     # Back right
+            (bot['width']/2, bot['length']/2)       # Front right
+        ]
+    else:
+        polygon_verts = [
+            (-bot['width']/4, bot['length']/2),     # Front left
+            (-bot['width']/2, y_break_point),       # Break point left
+            (-bot['width']/2, -bot['length']/2),    # Back left
+            (bot['width']/2, -bot['length']/2),     # Back right
+            (bot['width']/2, y_break_point),        # Break point right
+            (bot['width']/4, bot['length']/2),      # Front right
+        ]
     polygon = sp.Polygon(polygon_verts)
 
     if not bot['config']['wheels_covered']:
@@ -638,9 +709,9 @@ def add_bot_to_scene(bot, bots_collection, i):
     material.use_nodes = True
     color_ramp = material.node_tree.nodes.get("Color Ramp")
     color_ramp.color_ramp.elements[1].color = (
-        random.choice([random.uniform(0, 0.2), random.uniform(0.8, 1)]),
-        random.choice([random.uniform(0, 0.2), random.uniform(0.8, 1)]),
-        random.choice([random.uniform(0, 0.2), random.uniform(0.8, 1)]),
+        bot['config']['color'][0],
+        bot['config']['color'][1],
+        bot['config']['color'][2],
         1
     )
 
@@ -653,7 +724,7 @@ def add_bot_to_scene(bot, bots_collection, i):
 
 def generate_bots(corner_coords):
     COUNT = random.randint(3, 6)
-    # COUNT = 1
+    # COUNT = 10
 
     bots = []
     
