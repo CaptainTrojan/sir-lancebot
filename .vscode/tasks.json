@@ -14,6 +14,12 @@
             "type": "shell",
             "command": "blender blender/battlebot-arena.blend --quiet --background --python blender/render_script.py -- 1",
             "problemMatcher": []
+        },
+        {
+            "label": "Render dataset -1",
+            "type": "shell",
+            "command": "blender blender/battlebot-arena.blend --quiet --background --python blender/render_script.py -- -1",
+            "problemMatcher": []
         }
     ]
 }

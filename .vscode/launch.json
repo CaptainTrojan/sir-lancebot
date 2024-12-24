@@ -41,6 +41,6 @@
             "request": "launch",
             "console": "integratedTerminal",
             "program": "blender/view_element.py",
-        }
+        },
     ]
 }
