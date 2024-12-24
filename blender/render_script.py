@@ -284,7 +284,7 @@ def generate_random_bot_config(bots: list, corner_coords):
     wheel_armor_types = ["none", "individual"]
     num_wheels = random.choice([1, 2]) if bot_type != "horizontal spinner" else 1
     wheel_types = ["basic", "tire", "treaded"]
-    wheel_type_ps = [0.3, 0.5, 0.2] if num_wheels > 1 else [0.3, 0.7, 0.0]
+    wheel_type_ps = [0.1, 0.5, 0.4] if num_wheels > 1 else [0.3, 0.7, 0.0]
     wheel_y_range = bot['length'] * 0.15
     wheel_y_starts = np.linspace(-bot['length']*0.4, bot['length']*0.4-wheel_y_range, num_wheels, endpoint=True)
     wheels = []
@@ -370,7 +370,7 @@ def generate_random_bot_config(bots: list, corner_coords):
     # Return the bot configuration as a dictionary
     bot['config'] = {
         'wheels': wheels,
-        'wheels_covered': False, # random.choice([True, False]),
+        'wheels_covered': bool(np.random.choice([True, False], p=[0.2, 0.8])),
         'type': bot_type,
         'y_break_point': y_break_point,
         'color': color
@@ -796,7 +796,7 @@ if __name__ == "__main__":
     num_images = int(args[0])
 
     # Set seed
-    random.seed(0)
+    random.seed(1)
 
     # Clear the output directory
     output_dir = "BB_SYNTH_DATA"

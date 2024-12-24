@@ -131,7 +131,7 @@ def render_element(image_path, metadata_path):
     concatenated_image = np.hstack((image, bev_image))
 
     # Draw the metadata path somewhere
-    cv2.putText(concatenated_image, metadata_path, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 1)
+    # cv2.putText(concatenated_image, metadata_path, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 1)
 
     cv2.imshow("Image", concatenated_image)
 
