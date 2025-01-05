@@ -799,7 +799,7 @@ if __name__ == "__main__":
     random.seed(1)
 
     # Clear the output directory
-    output_dir = "BB_SYNTH_DATA"
+    output_dir = "data/BB_SYNTH_DATA"
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir)
     os.makedirs(output_dir)

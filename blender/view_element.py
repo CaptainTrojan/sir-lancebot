@@ -243,7 +243,7 @@ def main(dataset_path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Render dataset elements.')
-    parser.add_argument('-d', '--dataset_path', type=str, default='BB_SYNTH_DATA', help='Path to the dataset directory.')
+    parser.add_argument('-d', '--dataset_path', type=str, default='data/BB_SYNTH_DATA', help='Path to the dataset directory.')
 
     args = parser.parse_args()
     if os.path.exists(args.dataset_path):

@@ -49,8 +49,8 @@
             "console": "integratedTerminal",
             "program": "blender/blender_to_yolo.py",
             "args": [
-                "BB_SYNTH_DATA",
-                "BB_SYNTH_DATA_YOLO"
+                "data/BB_SYNTH_DATA",
+                "data/BB_SYNTH_DATA_YOLO"
             ]
         },
     ]
