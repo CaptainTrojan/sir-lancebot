@@ -42,5 +42,16 @@
             "console": "integratedTerminal",
             "program": "blender/view_element.py",
         },
+        {
+            "name": "Export YOLO dataset",
+            "type": "debugpy",
+            "request": "launch",
+            "console": "integratedTerminal",
+            "program": "blender/blender_to_yolo.py",
+            "args": [
+                "BB_SYNTH_DATA",
+                "BB_SYNTH_DATA_YOLO"
+            ]
+        },
     ]
 }

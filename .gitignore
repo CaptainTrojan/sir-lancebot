@@ -1,2 +1,3 @@
 */__pycache__
-BB_SYNTH_DATA/
+BB_SYNTH_*
+runs/*

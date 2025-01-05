@@ -1,5 +1,5 @@
 from visualizer import Visualizer
-from camera import DepthAICameraAdapter
+from camera import WebCameraAdapter
 from arena import ArenaModel
 import cv2 
 import numpy as np
@@ -7,7 +7,7 @@ import numpy as np
 
 class BotController:
     def __init__(self, args):
-        self.camera_adapter = DepthAICameraAdapter()
+        self.camera_adapter = WebCameraAdapter()
         self.arena_model = ArenaModel(args.width, args.length, args.bot_width,
             args.bot_length, args.aruco_size, args.aruco_margin
         )

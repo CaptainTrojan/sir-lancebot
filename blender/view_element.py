@@ -40,7 +40,9 @@ def bot_to_BEV(points, bot, arena_corners_bev, bev_scale_factor, target_height):
 
     return bot_points
 
-def render_element(image_path, metadata_path):
+def load_data(image_path, metadata_path, target_height=None, do_pad=False):
+    ret = {}
+
     # Load image
     image = cv2.imread(image_path)
 
@@ -68,7 +70,10 @@ def render_element(image_path, metadata_path):
         [0, arena_bev_height],
         [arena_bev_width, arena_bev_height]
     ])
-    target_height = cv2.getWindowImageRect("Image")[3]
+
+    if target_height is None:
+        target_height = cv2.getWindowImageRect("Image")[3]
+
     bev_scale_factor = target_height / arena_bev_height
     target_width = int(arena_bev_width * bev_scale_factor)
     target_corners = target_corners * bev_scale_factor
@@ -80,12 +85,18 @@ def render_element(image_path, metadata_path):
     # Flip the BEV image so that Y-axis points upwards
     bev_image = cv2.flip(bev_image, 0)
 
+    ret['bev_image'] = bev_image
+
     # Resize the image so that its height is the same as BEV image
     image_scale_factor = target_height / image.shape[0]
     image = cv2.resize(image, (int(image_scale_factor * image.shape[1]), target_height))
 
+    ret['image'] = image
+    ret['bev_bots'] = []
+
     # Draw bot BEV bounding boxes on the BEV view
     for bot in metadata['bots']:
+        ret['bev_bots'].append({})
         width = bot['width']
         length = bot['length']
 
@@ -100,9 +111,7 @@ def render_element(image_path, metadata_path):
         # Transform the bot points to BEV
         bev_bot_points = bot_to_BEV(bot_points, bot, arena_corners_bev, bev_scale_factor, target_height)
 
-        # Draw the bot points
-        for i in range(4):
-            cv2.line(bev_image, tuple(bev_bot_points[i]), tuple(bev_bot_points[(i+1)%4]), (0, 255, 255), 2)
+        ret['bev_bots'][-1]['bot_points'] = bev_bot_points
 
         # Collect wheel coordinates
         wheel_points = []
@@ -114,24 +123,90 @@ def render_element(image_path, metadata_path):
             x = width/2 + wheel['x_offset']
             wheel_points.append([x, y, 0])
 
-        # Transform the wheel points to BEV
         bev_wheel_points = bot_to_BEV(np.array(wheel_points), bot, arena_corners_bev, bev_scale_factor, target_height)
+        ret['bev_bots'][-1]['wheel_points'] = bev_wheel_points
+
+        forward = bot_to_BEV(np.array([[0, length/2, 0]]), bot, arena_corners_bev, bev_scale_factor, target_height)
+        ret['bev_bots'][-1]['forward'] = forward
+
+    if do_pad:
+        # Ensure that the BEV image is square and the points are correctly scaled and offset
+
+        # Calculate the scaling factor
+        height, width = bev_image.shape[:2]
+        if width > height:
+            # The image will have to be scaled down, because the width is larger than the target width, which is the height
+            pad_scale_factor = target_height / width
+
+            # Scale the BEV image
+            bev_image = cv2.resize(bev_image, (target_height, int(height * pad_scale_factor)))
+        else:
+            pad_scale_factor = 1.0  # No scaling is needed, the image already fits inside the square
+
+        # Calculate the padding
+        height, width = bev_image.shape[:2]
+        required_width_padding = target_height - width
+        required_height_padding = target_height - height
+
+        # Only one of these should be non-zero
+        assert required_width_padding * required_height_padding == 0
+        # assert required_width_padding + required_height_padding > 0
+
+        # Apply the padding to the BEV image, so that it becomes square
+        left_pad_width = required_width_padding // 2
+        left_pad_height = required_height_padding // 2
+        right_pad_width = required_width_padding - left_pad_width
+        right_pad_height = required_height_padding - left_pad_height
+        ret['bev_image'] = cv2.copyMakeBorder(bev_image, left_pad_height, right_pad_height, left_pad_width, right_pad_width, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+
+        assert ret['bev_image'].shape[0] == ret['bev_image'].shape[1] == target_height
+
+        # Re-calculate the point coordinates
+        for bot in ret['bev_bots']:
+            bot['bot_points'] = bot['bot_points'].astype(np.float32)
+            bot['bot_points'] *= pad_scale_factor
+            bot['bot_points'] += np.array([left_pad_width, left_pad_height])
+            bot['bot_points'] = bot['bot_points'].astype(np.int32)
+
+            bot['wheel_points'] = bot['wheel_points'].astype(np.float32)
+            bot['wheel_points'] *= pad_scale_factor
+            bot['wheel_points'] += np.array([left_pad_width, left_pad_height])
+            bot['wheel_points'] = bot['wheel_points'].astype(np.int32)
+
+            bot['forward'] = bot['forward'].astype(np.float32)
+            bot['forward'][0] *= pad_scale_factor
+            bot['forward'][0] += np.array([left_pad_width, left_pad_height])
+            bot['forward'] = bot['forward'].astype(np.int32)
+
+    return ret
+
+def render_element(image_path, metadata_path):
+    # Load the data
+    data = load_data(image_path, metadata_path, do_pad=True)
+    image = data['image']
+    bev_image = data['bev_image']
+
+    # Draw bot BEV bounding boxes on the BEV view
+    for bot in data['bev_bots']:
+        bev_bot_points = bot['bot_points']
+
+        # Draw the bot points
+        for i in range(4):
+            cv2.line(bev_image, tuple(bev_bot_points[i]), tuple(bev_bot_points[(i+1)%4]), (0, 255, 255), 2)
+
+        bev_wheel_points = bot['wheel_points']
 
         # Draw the wheel points
         for i in range(len(bev_wheel_points)):
             cv2.circle(bev_image, tuple(bev_wheel_points[i]), 5, (0, 255, 255), -1)
 
         # Draw a blue arrow pointing forward from the bot's center
-        center = bot_to_BEV(np.array([[0, 0, 0]]), bot, arena_corners_bev, bev_scale_factor, target_height)
-        forward = bot_to_BEV(np.array([[0, length, 0]]), bot, arena_corners_bev, bev_scale_factor, target_height)
+        forward = bot['forward']
 
-        cv2.arrowedLine(bev_image, tuple(center[0]), tuple(forward[0]), (0, 255, 255), 2)
+        cv2.circle(bev_image, tuple(forward[0]), 5, (255, 255, 255), -1)
 
     # Concatenate the images
     concatenated_image = np.hstack((image, bev_image))
-
-    # Draw the metadata path somewhere
-    # cv2.putText(concatenated_image, metadata_path, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 1)
 
     cv2.imshow("Image", concatenated_image)
 
