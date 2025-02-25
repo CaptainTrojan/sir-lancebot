@@ -53,5 +53,27 @@
                 "data/BB_SYNTH_DATA_YOLO"
             ]
         },
+        {
+            "name": "Annotate DJI videos",
+            "type": "debugpy",
+            "request": "launch",
+            "console": "integratedTerminal",
+            "program": "annotation/annotate_dji.py",
+            "args": [
+                "data/arena_dji_captures",
+                "data/dji_yolo"
+            ]
+        },
+        {
+            "name": "Visualize annotations",
+            "type": "debugpy",
+            "request": "launch",
+            "console": "integratedTerminal",
+            "program": "annotation/view_yolo.py",
+            "args": [
+                "data/dji_yolo/images",
+                "data/dji_yolo/labels"
+            ]
+        },
     ]
 }
