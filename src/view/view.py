@@ -63,7 +63,7 @@ class MainView(QMainWindow):
         
         # Left panel (fixed width)
         left_panel = QWidget()
-        left_panel.setFixedWidth(150)
+        left_panel.setFixedWidth(70)
         left_layout = QVBoxLayout(left_panel)
         left_layout.setAlignment(Qt.AlignmentFlag.AlignTop)  # Align to top
         for i in range(1, 4):
