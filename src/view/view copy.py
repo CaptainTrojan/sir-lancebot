@@ -1,7 +1,8 @@
 import cv2
 import numpy as np
-from arena import ArenaState
+from src.model.arena import ArenaState
 from time import perf_counter
+from PyQt6.QtWidgets import QWidget
 
 
 WINDOW_ORIGINAL = "Original view"
@@ -10,8 +11,9 @@ WINDOW_TRANSFORMED = "Transformed view"
 WINDOW_BASELINE_DIFF = "Baseline difference"
 
 
-class Visualizer:
-    def __init__(self, preview_width):
+class Visualizer(QWidget):
+    def __init__(self, view_model):
+        self.view_model = view_model
         self.preview_width = preview_width
         self.resize_factor = None
         self.px_per_mm = None

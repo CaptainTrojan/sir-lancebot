@@ -1,0 +1,224 @@
+from dataclasses import dataclass
+import sys
+from time import time
+import cv2
+import numpy as np
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QLabel, QVBoxLayout, QHBoxLayout,
+                            QToolBar, QMenuBar, QWidget, QPushButton, QFrame, QSizePolicy,
+                            QScrollArea)
+from PyQt6.QtGui import QImage, QPixmap, QAction, QIcon
+from PyQt6.QtCore import QTimer, Qt
+
+# Global variables
+streams = {}
+last_update_time = time()
+
+# External function mock (replace with actual implementation)
+def get_streams():
+    global streams, last_update_time
+    if time() - last_update_time > 1:
+        streams.clear()
+        last_update_time = time()
+        # Generate random images with varying dimensions
+        for i in range(np.random.randint(1, 6)):
+            w = np.random.randint(100, 301)
+            h = np.random.randint(100, 301)
+            img = np.zeros((h, w, 3), dtype=np.uint8)
+            cv2.line(img, (0, 0), (w, h), (255, 255, 255), 2)
+            cv2.line(img, (0, h), (w, 0), (255, 255, 255), 2)
+            cv2.putText(img, f"Stream {i+1}", (10, h//2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
+            streams[f"cam_{i}"] = img
+    return streams
+
+@dataclass
+class StreamView:
+    name: str
+    img: np.ndarray
+    widget: QLabel
+    
+    @property
+    def width(self):
+        return self.img.shape[1]
+
+    @property
+    def height(self):
+        return self.img.shape[0]
+
+class MainView(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Main Application")
+        self.setGeometry(100, 100, 1200, 800)
+        
+        # Menu bar
+        menu_bar = QMenuBar(self)
+        settings_menu = menu_bar.addMenu("Settings")
+        self.setMenuBar(menu_bar)
+        
+        # Main widget setup
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        layout = QHBoxLayout(main_widget)
+        
+        # Left panel (fixed width)
+        left_panel = QWidget()
+        left_panel.setFixedWidth(150)
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setAlignment(Qt.AlignmentFlag.AlignTop)  # Align to top
+        for i in range(1, 4):
+            button = QPushButton()
+            button.setFixedSize(50, 50)
+            button.setIcon(QIcon("icon.png"))
+            left_layout.addWidget(button)
+        
+        # Central view layout
+        central_layout = QVBoxLayout()
+        
+        # Central view
+        self.main_display = QLabel()
+        self.main_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.main_display.setSizePolicy(QSizePolicy.Policy.Expanding, 
+                                      QSizePolicy.Policy.Expanding)
+        
+        # Stream name label
+        self.stream_name_label = QLabel("<No stream selected>")
+        self.stream_name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Add central view and stream name label to central layout
+        central_layout.addWidget(self.main_display)
+        central_layout.addWidget(self.stream_name_label)
+        
+        # Right sidebar with scroll
+        sidebar_scroll = QScrollArea()
+        sidebar_scroll.setFixedWidth(240)
+        sidebar_scroll.setWidgetResizable(True)
+        self.sidebar_content = QWidget()
+        self.sidebar_layout = QVBoxLayout(self.sidebar_content)
+        self.sidebar_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.sidebar_layout.setSpacing(15)
+        self.sidebar_layout.setContentsMargins(5, 5, 15, 5)
+        sidebar_scroll.setWidget(self.sidebar_content)
+        
+        # Assemble main layout
+        layout.addWidget(left_panel)
+        layout.addLayout(central_layout)
+        layout.addWidget(sidebar_scroll)
+        
+        # Update timer
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_displays)
+        self.timer.start(30)
+        
+        # Selected stream
+        self.selected_stream = None
+        self.opened_streams = {}
+
+    def update_displays(self):
+        # Update main view
+        streams = get_streams()
+        if self.selected_stream:
+            if self.selected_stream in streams:
+                self.update_main_view(streams[self.selected_stream])
+            else:
+                self.selected_stream = None
+                self.stream_name_label.setText("<No stream selected>")
+                self.main_display.clear()
+        
+        # Update sidebar
+        self.update_sidebar(streams)
+
+    def update_main_view(self, img):
+        h, w = img.shape[:2]
+        qimg = QImage(img.data, w, h, img.strides[0], QImage.Format.Format_BGR888)
+        pixmap = QPixmap.fromImage(qimg).scaled(
+            self.main_display.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        self.main_display.setPixmap(pixmap)
+        
+    def create_stream_widget(self, key, img, w, h):
+        # Create image label
+        label = QLabel()
+        label.setFixedWidth(w)
+        label.setFixedHeight(h)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Scale image appropriately
+        qimg = QImage(img.data, img.shape[1], img.shape[0], img.strides[0], QImage.Format.Format_BGR888)
+        pixmap = QPixmap.fromImage(qimg).scaled(
+            label.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.FastTransformation
+        )
+        label.setPixmap(pixmap)
+        
+        # Add click event
+        label.mousePressEvent = lambda event, key=key: self.select_stream(key)
+        
+        # Add to sidebar layout
+        self.sidebar_layout.addWidget(label)
+        
+        # Add to opened streams
+        self.opened_streams[key] = StreamView(key, img, label)
+        
+    def destroy_stream_widget(self, key):
+        self.opened_streams[key].widget.deleteLater()
+        del self.opened_streams[key]
+        
+    def update_sidebar(self, streams):
+        # # Clear existing widgets
+        # while self.sidebar_layout.count():
+        #     item = self.sidebar_layout.takeAt(0)
+        #     if widget := item.widget():
+        #         widget.deleteLater()
+        
+        # Find each widget that needs to be removed (stream no longer exists)
+        to_delete = []
+        for stream_name in self.opened_streams:
+            if stream_name not in streams:
+                to_delete.append(stream_name)
+
+        # Remove widgets
+        for stream_name in to_delete:
+        # for stream_name in list(self.opened_streams.keys()):
+            self.destroy_stream_widget(stream_name)
+            
+        print(f"Opened streams: {len(self.opened_streams)}")
+        print(f"Streams: {len(streams)}")
+        
+        # Handle streams
+        sidebar_width = 200
+        for key, img in streams.items():
+            h, w = img.shape[:2]
+            aspect_ratio = h / w
+            
+            # If we are already showing this stream
+            if key in self.opened_streams:  
+                # check if the image size has changed
+                old_h, old_w = self.opened_streams[key].height, self.opened_streams[key].width
+                if old_h != h or old_w != w:
+                    # Remove the old widget
+                    self.destroy_stream_widget(key)
+
+                    # Create a new widget
+                    self.create_stream_widget(key, img, sidebar_width, int(sidebar_width * aspect_ratio))
+            
+            # If we are not showing this stream yet
+            else:
+                # Create a new widget
+                self.create_stream_widget(key, img, sidebar_width, int(sidebar_width * aspect_ratio))
+        
+        # Add spacer
+        # self.sidebar_layout.addStretch()
+
+    def select_stream(self, key):
+        self.selected_stream = key
+        self.stream_name_label.setText(f"Selected Stream: {key}")
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = MainView()
+    window.show()
+    sys.exit(app.exec())

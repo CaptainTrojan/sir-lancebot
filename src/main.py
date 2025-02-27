@@ -1,5 +1,10 @@
 import argparse
-from controller import BotController
+import sys
+from src.model.arena import ArenaModel
+from src.model.camera import WebCameraAdapter
+from src.view.view import Visualizer
+from viewmodel import BotViewModel
+from PyQt6.QtWidgets import QApplication
 
 if __name__ == '__main__':
 
@@ -14,8 +19,10 @@ if __name__ == '__main__':
     parser.add_argument("-pw", "--preview_width", type=int, default=900, help="Width of the preview windows")
     args = parser.parse_args()
 
-    # Create the controller
-    controller = BotController(args)
-    
-    # Run the controller
-    controller.run()
+    app = QApplication(sys.argv)
+    arena_model = ArenaModel(args.width, args.length, args.bot_width, args.bot_length, args.aruco_size, args.aruco_margin)
+    camera_model = WebCameraAdapter()
+    view_model = BotViewModel(arena_model, camera_model)
+    view = Visualizer(view_model)
+    view.show()
+    sys.exit(app.exec())
