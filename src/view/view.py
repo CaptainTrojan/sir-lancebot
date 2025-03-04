@@ -66,7 +66,7 @@ class MainView(QMainWindow):
         self.main_display = QLabel()
         self.main_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.main_display.setSizePolicy(QSizePolicy.Policy.Expanding, 
-                                      QSizePolicy.Policy.Expanding)
+                          QSizePolicy.Policy.Expanding)
         
         # Stream name label
         self.stream_name_label = QLabel("<No stream selected>")
