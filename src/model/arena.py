@@ -73,7 +73,7 @@ class ArenaModel:
         transformed_frame = self._transform_view(frame)
         self.baseline_frame = transformed_frame
 
-    def get_state(self, frame):
+    def update_state(self, frame):
         if self.corner_points is None:
             return ArenaState(self.arena_width, self.arena_length)
 

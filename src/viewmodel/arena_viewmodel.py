@@ -3,11 +3,12 @@ from model.arena import ArenaModel, ArenaState
 import cv2
 import numpy as np
 from time import perf_counter
-from PyQt6.QtCore import pyqtSignal, QObject
+from PyQt6.QtCore import pyqtSignal, QObject, QTimer
 
 
 class ArenaViewModel(QObject):
-    webcam_list_changed = pyqtSignal(list)
+    webcam_list = pyqtSignal(tuple)
+    streams = pyqtSignal(dict)
     
     def __init__(self, arena_model: ArenaModel, camera_model: WebCameraModel):
         super().__init__()
@@ -15,9 +16,41 @@ class ArenaViewModel(QObject):
         self.arena_model = arena_model
         self.last_vis_time = None
         
+        # Send streams every 30ms
+        self.streams_timer = QTimer()
+        self.streams_timer.timeout.connect(self.update_streams)
+        self.streams_timer.start(0)
+        
+        self._current_streams = None
+        
     def update_webcam_list(self):
         webcam_ids = self.camera_adapter.list_available_ids()
-        self.webcam_list_changed.emit(webcam_ids)
+        self.webcam_list.emit(webcam_ids)
+        
+    def update_streams(self):
+        self._current_streams = {}
+        
+        frame = self.camera_adapter.get_frame()
+        arena_state = self.arena_model.update_state(frame)
+        if frame is not None:
+            self._current_streams['original_frame'] = self.get_original_view(frame, self.arena_model.corner_points)
+
+            transformed_frame = self.get_transformed_view(arena_state)
+            if transformed_frame is not None:
+                self._current_streams['transformed_frame'] = transformed_frame
+            
+            model_frame = self.get_model_frame(arena_state)
+            if model_frame is not None:
+                self._current_streams['model_frame'] = model_frame
+                
+            baseline_diff = self.get_baseline_diff_frame(arena_state)
+            if baseline_diff is not None:
+                self._current_streams['baseline_diff'] = baseline_diff
+                
+        self.streams.emit(self._current_streams.copy())
+        
+    def get_streams(self):
+        return self._current_streams.copy()
         
     def select_webcam(self, webcam_id):
         self.camera_adapter.set_camera_id(webcam_id)
@@ -44,7 +77,7 @@ class ArenaViewModel(QObject):
             return vis_transformed_frame
         return None
 
-    def get_model_view(self, arena_state: ArenaState):
+    def get_model_frame(self, arena_state: ArenaState):
         if arena_state.transformed_frame is not None:
             model_view = np.zeros((arena_state.transformed_frame.shape[0], arena_state.transformed_frame.shape[1], 3), dtype=np.uint8)
             arena_border_margin = 0.1
@@ -55,7 +88,7 @@ class ArenaViewModel(QObject):
             return model_view
         return None
 
-    def get_baseline_diff_view(self, arena_state: ArenaState):
+    def get_baseline_diff_frame(self, arena_state: ArenaState):
         if arena_state.baseline_frame is not None:
             baseline_diff = cv2.absdiff(arena_state.transformed_frame, arena_state.baseline_frame)
             baseline_diff = cv2.cvtColor(baseline_diff, cv2.COLOR_BGR2GRAY)

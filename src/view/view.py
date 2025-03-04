@@ -8,28 +8,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QLabel, QVBoxLayout, QHB
                             QScrollArea, QDialog, QVBoxLayout, QPushButton, QMenu)
 from PyQt6.QtGui import QImage, QPixmap, QAction, QIcon
 from PyQt6.QtCore import QTimer, Qt
-
-# Global variables
-streams = {}
-last_update_time = time()
-
-# External function mock (replace with actual implementation)
-def get_streams():
-    global streams, last_update_time
-    if time() - last_update_time > 1:
-        streams.clear()
-        last_update_time = time()
-        # Generate random images with varying dimensions
-        for i in range(np.random.randint(1, 6)):
-            w = np.random.randint(100, 301)
-            h = np.random.randint(100, 301)
-            img = np.zeros((h, w, 3), dtype=np.uint8)
-            cv2.line(img, (0, 0), (w, h), (255, 255, 255), 2)
-            cv2.line(img, (0, h), (w, 0), (255, 255, 255), 2)
-            cv2.putText(img, f"Stream {i+1}", (10, h//2),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
-            streams[f"cam_{i}"] = img
-    return streams
+from viewmodel.arena_viewmodel import ArenaViewModel
 
 @dataclass
 class StreamView:
@@ -46,7 +25,7 @@ class StreamView:
         return self.img.shape[0]
 
 class MainView(QMainWindow):
-    def __init__(self, view_model):
+    def __init__(self, view_model: ArenaViewModel):
         super().__init__()
         self.view_model = view_model
         
@@ -61,6 +40,7 @@ class MainView(QMainWindow):
         
         # Select Webcam menu
         self.select_webcam_menu = QMenu("Select Webcam", self)
+        self.select_webcam_menu.aboutToShow.connect(self.view_model.update_webcam_list)
         settings_menu.addMenu(self.select_webcam_menu)
         
         # Main widget setup
@@ -117,25 +97,22 @@ class MainView(QMainWindow):
         self.timer.timeout.connect(self.update_displays)
         self.timer.start(30)
         
-        # Webcam refresh timer
-        self.webcam_timer = QTimer()
-        self.webcam_timer.timeout.connect(self.refresh_webcam_list)
-        self.webcam_timer.start(5000)
-        
         # Selected stream
         self.selected_stream = None
         self.opened_streams = {}
         self.webcam_list = []
 
         # Add webcam listener
-        self.view_model.webcam_list_changed.connect(self.update_webcam_list)
-        self.refresh_webcam_list()
-
-    def refresh_webcam_list(self):
+        self.view_model.webcam_list.connect(self.update_webcam_list)
+        
+        # Add stream listener
+        self.view_model.streams.connect(self.update_displays)
+        
+        # Instantly ask for a webcam list refresh
         self.view_model.update_webcam_list()
 
     def update_webcam_list(self, webcams):
-        self.webcam_list = webcams
+        self.webcam_list, selected_id = webcams
         self.select_webcam_menu.clear()
         if not self.webcam_list:
             action = QAction("<No webcams found>", self)
@@ -144,15 +121,19 @@ class MainView(QMainWindow):
         else:
             for index, webcam in enumerate(self.webcam_list):
                 action = QAction(f"Webcam {webcam}", self)
+                if index == selected_id:
+                    action.setIcon(QIcon("tick_icon.png"))  # Assuming you have a tick icon
                 action.triggered.connect(lambda _, index=index: self.select_webcam(index))
                 self.select_webcam_menu.addAction(action)
 
     def select_webcam(self, camera_index):
         self.view_model.select_webcam(camera_index)
 
-    def update_displays(self):
-        # Update main view
-        streams = get_streams()
+    def update_displays(self, streams=None):
+        if streams is None:
+            # In case it's called due to internal refresh, not VM signal
+            streams = self.view_model.get_streams()
+            
         if self.selected_stream:
             if self.selected_stream in streams:
                 self.update_main_view(streams[self.selected_stream])
@@ -237,7 +218,7 @@ class MainView(QMainWindow):
                 self.create_stream_widget(key, img, sidebar_width, int(sidebar_width * aspect_ratio))
         
         # Add spacer
-        self.sidebar_layout.addStretch()
+        # self.sidebar_layout.addStretch()
 
     def select_stream(self, key):
         self.selected_stream = key
