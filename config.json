@@ -1,0 +1,10 @@
+{
+    "arena": {
+        "arena_width": 1000,
+        "arena_length": 2000,
+        "bot_width": 100,
+        "bot_length": 200,
+        "aruco_size": 50,
+        "aruco_margin": 10
+    }
+}

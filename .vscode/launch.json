@@ -76,11 +76,11 @@
             ]
         },
         {
-            "name": "View test",
+            "name": "APP: Run",
             "type": "debugpy",
             "request": "launch",
             "console": "integratedTerminal",
-            "program": "src/view/view.py",
+            "program": "src/main.py",
         }
     ]
 }

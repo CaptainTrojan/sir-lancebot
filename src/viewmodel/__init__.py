@@ -1,3 +1,3 @@
-from src.viewmodel.bot_viewmodel import *
-from src.model.camera import *
-from src.model.arena import *
+from viewmodel.arena_viewmodel import *
+from model.camera import *
+from model.arena import *

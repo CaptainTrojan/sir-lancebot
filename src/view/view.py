@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QLabel, QVBoxLayout, QHBoxLayout,
                             QToolBar, QMenuBar, QWidget, QPushButton, QFrame, QSizePolicy,
-                            QScrollArea)
+                            QScrollArea, QDialog, QVBoxLayout, QPushButton, QMenu)
 from PyQt6.QtGui import QImage, QPixmap, QAction, QIcon
 from PyQt6.QtCore import QTimer, Qt
 
@@ -46,15 +46,22 @@ class StreamView:
         return self.img.shape[0]
 
 class MainView(QMainWindow):
-    def __init__(self):
+    def __init__(self, view_model):
         super().__init__()
+        self.view_model = view_model
+        
         self.setWindowTitle("Main Application")
         self.setGeometry(100, 100, 1200, 800)
         
         # Menu bar
         menu_bar = QMenuBar(self)
         settings_menu = menu_bar.addMenu("Settings")
+        
         self.setMenuBar(menu_bar)
+        
+        # Select Webcam menu
+        self.select_webcam_menu = QMenu("Select Webcam", self)
+        settings_menu.addMenu(self.select_webcam_menu)
         
         # Main widget setup
         main_widget = QWidget()
@@ -110,9 +117,38 @@ class MainView(QMainWindow):
         self.timer.timeout.connect(self.update_displays)
         self.timer.start(30)
         
+        # Webcam refresh timer
+        self.webcam_timer = QTimer()
+        self.webcam_timer.timeout.connect(self.refresh_webcam_list)
+        self.webcam_timer.start(5000)
+        
         # Selected stream
         self.selected_stream = None
         self.opened_streams = {}
+        self.webcam_list = []
+
+        # Add webcam listener
+        self.view_model.webcam_list_changed.connect(self.update_webcam_list)
+        self.refresh_webcam_list()
+
+    def refresh_webcam_list(self):
+        self.view_model.update_webcam_list()
+
+    def update_webcam_list(self, webcams):
+        self.webcam_list = webcams
+        self.select_webcam_menu.clear()
+        if not self.webcam_list:
+            action = QAction("<No webcams found>", self)
+            action.setEnabled(False)
+            self.select_webcam_menu.addAction(action)
+        else:
+            for index, webcam in enumerate(self.webcam_list):
+                action = QAction(f"Webcam {webcam}", self)
+                action.triggered.connect(lambda _, index=index: self.select_webcam(index))
+                self.select_webcam_menu.addAction(action)
+
+    def select_webcam(self, camera_index):
+        self.view_model.select_webcam(camera_index)
 
     def update_displays(self):
         # Update main view
@@ -168,12 +204,6 @@ class MainView(QMainWindow):
         del self.opened_streams[key]
         
     def update_sidebar(self, streams):
-        # # Clear existing widgets
-        # while self.sidebar_layout.count():
-        #     item = self.sidebar_layout.takeAt(0)
-        #     if widget := item.widget():
-        #         widget.deleteLater()
-        
         # Find each widget that needs to be removed (stream no longer exists)
         to_delete = []
         for stream_name in self.opened_streams:
@@ -182,11 +212,7 @@ class MainView(QMainWindow):
 
         # Remove widgets
         for stream_name in to_delete:
-        # for stream_name in list(self.opened_streams.keys()):
             self.destroy_stream_widget(stream_name)
-            
-        print(f"Opened streams: {len(self.opened_streams)}")
-        print(f"Streams: {len(streams)}")
         
         # Handle streams
         sidebar_width = 200
@@ -211,14 +237,21 @@ class MainView(QMainWindow):
                 self.create_stream_widget(key, img, sidebar_width, int(sidebar_width * aspect_ratio))
         
         # Add spacer
-        # self.sidebar_layout.addStretch()
+        self.sidebar_layout.addStretch()
 
     def select_stream(self, key):
         self.selected_stream = key
         self.stream_name_label.setText(f"Selected Stream: {key}")
 
 if __name__ == "__main__":
+    from src.viewmodel.arena_viewmodel import ArenaViewModel
+    from src.model.camera import WebCameraModel
+    from src.model.arena import ArenaModel
+
     app = QApplication(sys.argv)
-    window = MainView()
+    camera_model = WebCameraModel()
+    arena_model = ArenaModel()
+    view_model = ArenaViewModel(arena_model, camera_model)
+    window = MainView(view_model)
     window.show()
     sys.exit(app.exec())
